@@ -79,6 +79,7 @@
     <modules>
         <module>tech.kage.event</module>
         <module>tech.kage.event.postgres</module>
+        <module>tech.kage.event.replicator</module>
     </modules>
 
     <dependencyManagement>
@@ -161,6 +162,12 @@
                     <groupId>org.jacoco</groupId>
                     <artifactId>jacoco-maven-plugin</artifactId>
                     <version>${jacoco.version}</version>
+
+                    <configuration>
+                        <excludes>
+                            <exclude>tech/kage/**/Application.class</exclude>
+                        </excludes>
+                    </configuration>
 
                     <executions>
                         <execution>

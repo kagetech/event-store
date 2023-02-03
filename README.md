@@ -73,6 +73,10 @@ var event = Event.from(key, payload);
 eventStore.save("sample_topic", event);
 ```
 
+**Replicate events to Kafka**
+
+See [Event Replicator](tech.kage.event.replicator).
+
 ## Examples
 
 The [test classes](tech.kage.event.postgres/src/test/java/tech/kage/event/postgres) contain code that may be used for learning how to use this project.
