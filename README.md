@@ -77,6 +77,10 @@ eventStore.save("sample_topic", event);
 
 See [Event Replicator](tech.kage.event.replicator).
 
+**Process events**
+
+See [Reactor Kafka Event Store](tech.kage.event.kafka.reactor).
+
 ## Examples
 
 The [test classes](tech.kage.event.postgres/src/test/java/tech/kage/event/postgres) contain code that may be used for learning how to use this project.

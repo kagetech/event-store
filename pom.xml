@@ -78,6 +78,7 @@
 
     <modules>
         <module>tech.kage.event</module>
+        <module>tech.kage.event.kafka.reactor</module>
         <module>tech.kage.event.postgres</module>
         <module>tech.kage.event.replicator</module>
     </modules>
