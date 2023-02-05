@@ -52,6 +52,9 @@
         <!-- Kafka Avro Serializer -->
         <kafka.avro.serializer.version>7.3.1</kafka.avro.serializer.version>
 
+        <!-- Kafka Streams Avro SerDe -->
+        <kafka.streams.avro.serde.version>7.3.1</kafka.streams.avro.serde.version>
+
         <!-- Apache Avro -->
         <avro.version>1.11.1</avro.version>
 
@@ -79,6 +82,7 @@
     <modules>
         <module>tech.kage.event</module>
         <module>tech.kage.event.kafka.reactor</module>
+        <module>tech.kage.event.kafka.streams</module>
         <module>tech.kage.event.postgres</module>
         <module>tech.kage.event.replicator</module>
     </modules>
@@ -95,6 +99,12 @@
                 <groupId>io.confluent</groupId>
                 <artifactId>kafka-avro-serializer</artifactId>
                 <version>${kafka.avro.serializer.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>io.confluent</groupId>
+                <artifactId>kafka-streams-avro-serde</artifactId>
+                <version>${kafka.streams.avro.serde.version}</version>
             </dependency>
 
             <dependency>

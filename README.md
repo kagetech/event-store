@@ -79,7 +79,7 @@ See [Event Replicator](tech.kage.event.replicator).
 
 **Process events**
 
-See [Reactor Kafka Event Store](tech.kage.event.kafka.reactor).
+See [Reactor Kafka Event Store](tech.kage.event.kafka.reactor) and [Kafka Streams Event Store](tech.kage.event.kafka.streams).
 
 ## Examples
 
