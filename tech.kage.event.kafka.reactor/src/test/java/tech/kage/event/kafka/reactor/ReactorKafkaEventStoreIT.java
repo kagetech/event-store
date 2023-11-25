@@ -26,9 +26,6 @@
 package tech.kage.event.kafka.reactor;
 
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.Reader;
-import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -44,6 +41,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.io.Resource;
@@ -54,7 +52,6 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.reactive.TransactionalOperator;
-import org.springframework.util.FileCopyUtils;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.Network;
@@ -119,18 +116,12 @@ class ReactorKafkaEventStoreIT {
             .waitingFor(Wait.forHttp("/subjects").forStatusCode(200));
 
     @Container
+    @ServiceConnection
     static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:15-alpine");
 
     @DynamicPropertySource
     static void overrideProperties(DynamicPropertyRegistry registry) {
         registry.add("spring.kafka.bootstrap-servers", () -> kafka.getBootstrapServers());
-
-        registry.add(
-                "spring.r2dbc.url",
-                () -> "r2dbc:postgresql://%s:%s/%s".formatted(postgres.getHost(), postgres.getFirstMappedPort(),
-                        postgres.getDatabaseName()));
-        registry.add("spring.r2dbc.username", () -> postgres.getUsername());
-        registry.add("spring.r2dbc.password", () -> postgres.getPassword());
 
         registry.add(
                 "spring.kafka.properties.schema.registry.url",
@@ -144,24 +135,16 @@ class ReactorKafkaEventStoreIT {
     }
 
     @BeforeEach
-    void setUp(@Value("classpath:/test-data/events/ddl.sql") Resource ddl) {
+    void setUp(@Value("classpath:/test-data/events/ddl.sql") Resource ddl) throws IOException {
         topic = "test_" + System.currentTimeMillis() + "_events";
 
         kafkaAdmin.createOrModifyTopics(TopicBuilder.name(topic).build());
 
         databaseClient
-                .sql(getContentAsString(ddl))
+                .sql(ddl.getContentAsString(StandardCharsets.UTF_8))
                 .fetch()
                 .rowsUpdated()
                 .block();
-    }
-
-    private String getContentAsString(Resource resource) {
-        try (Reader reader = new InputStreamReader(resource.getInputStream(), StandardCharsets.UTF_8)) {
-            return FileCopyUtils.copyToString(reader);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
     }
 
     @Test

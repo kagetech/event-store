@@ -34,9 +34,6 @@ import static org.mockito.Mockito.verify;
 import static tech.kage.event.replicator.entity.EventReplicator.PROGRESS_TOPIC;
 
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.Reader;
-import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -57,6 +54,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.env.Environment;
@@ -70,7 +68,6 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.util.FileCopyUtils;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -115,6 +112,7 @@ class EventReplicatorIT {
     Map<String, Long> topicLastIds;
 
     @Container
+    @ServiceConnection
     static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:15-alpine");
 
     @Container
@@ -122,13 +120,6 @@ class EventReplicatorIT {
 
     @DynamicPropertySource
     static void overrideProperties(DynamicPropertyRegistry registry) {
-        registry.add(
-                "spring.datasource.url",
-                () -> "jdbc:postgresql://%s:%s/%s".formatted(postgres.getHost(), postgres.getFirstMappedPort(),
-                        postgres.getDatabaseName()));
-        registry.add("spring.datasource.username", () -> postgres.getUsername());
-        registry.add("spring.datasource.password", () -> postgres.getPassword());
-
         registry.add("spring.kafka.bootstrap-servers", () -> kafka.getBootstrapServers());
     }
 
@@ -140,7 +131,7 @@ class EventReplicatorIT {
     }
 
     @BeforeEach
-    void setUp(@Value("classpath:/test-data/events/ddl.sql") Resource ddl) {
+    void setUp(@Value("classpath:/test-data/events/ddl.sql") Resource ddl) throws IOException {
         topicLastIds = LongStream
                 .rangeClosed(1, 10)
                 .boxed()
@@ -149,7 +140,8 @@ class EventReplicatorIT {
 
         // create source event tables
         for (var topic : topicLastIds.keySet()) {
-            jdbcTemplate.execute(getContentAsString(ddl).replace("events.test_events", "events." + topic));
+            jdbcTemplate.execute(
+                    ddl.getContentAsString(StandardCharsets.UTF_8).replace("events.test_events", "events." + topic));
         }
     }
 
@@ -158,14 +150,6 @@ class EventReplicatorIT {
         // drop source event tables
         for (var topic : topicLastIds.keySet()) {
             jdbcTemplate.execute("drop table events." + topic);
-        }
-    }
-
-    private String getContentAsString(Resource resource) {
-        try (Reader reader = new InputStreamReader(resource.getInputStream(), StandardCharsets.UTF_8)) {
-            return FileCopyUtils.copyToString(reader);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
         }
     }
 

@@ -36,6 +36,7 @@ module tech.kage.event.kafka.streams {
 
     requires spring.context;
     requires spring.beans;
+    requires spring.boot;
 
     requires transitive kafka.streams;
     requires transitive kafka.clients;

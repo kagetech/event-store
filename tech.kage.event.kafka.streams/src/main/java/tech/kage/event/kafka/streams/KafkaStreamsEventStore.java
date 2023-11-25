@@ -162,7 +162,7 @@ public class KafkaStreamsEventStore implements EventStore {
 
         @Bean
         ProducerFactory<?, ?> kafkaProducerFactory(KafkaProperties properties) {
-            var props = properties.buildProducerProperties();
+            var props = properties.buildProducerProperties(null);
 
             props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, KEY_SERIALIZER_CLASS);
             props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, VALUE_SERIALIZER_CLASS);

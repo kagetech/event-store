@@ -138,7 +138,7 @@ class KafkaStreamsEventStoreIT {
     static class TestConfiguration {
         @Bean
         ReceiverOptions<UUID, SpecificRecord> kafkaReceiverOptions(KafkaProperties properties) {
-            var props = properties.buildConsumerProperties();
+            var props = properties.buildConsumerProperties(null);
 
             props.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_committed");
             props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");

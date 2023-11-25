@@ -36,6 +36,7 @@ module tech.kage.event.kafka.reactor {
 
     requires spring.context;
     requires spring.beans;
+    requires spring.boot;
 
     requires reactor.kafka;
     requires kafka.clients;

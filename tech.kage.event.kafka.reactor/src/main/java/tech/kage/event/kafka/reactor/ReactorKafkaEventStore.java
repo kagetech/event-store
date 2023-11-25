@@ -247,7 +247,7 @@ public class ReactorKafkaEventStore implements EventStore {
 
         @Bean
         SenderOptions<UUID, SpecificRecord> kafkaSenderOptions(KafkaProperties properties) {
-            var props = properties.buildProducerProperties();
+            var props = properties.buildProducerProperties(null);
 
             props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
                     "org.apache.kafka.common.serialization.UUIDSerializer");
@@ -261,7 +261,7 @@ public class ReactorKafkaEventStore implements EventStore {
 
         @Bean
         ReceiverOptions<UUID, SpecificRecord> kafkaReceiverOptions(KafkaProperties properties) {
-            var props = properties.buildConsumerProperties();
+            var props = properties.buildConsumerProperties(null);
 
             props.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_committed");
             props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");

@@ -26,9 +26,6 @@
 package tech.kage.event.postgres;
 
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.Reader;
-import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
@@ -43,6 +40,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
@@ -51,7 +49,6 @@ import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.util.FileCopyUtils;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.Network;
@@ -88,6 +85,7 @@ class PostgresEventStoreIT {
     static final Network network = Network.newNetwork();
 
     @Container
+    @ServiceConnection
     static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:15-alpine");
 
     @SuppressWarnings("resource")
@@ -110,13 +108,6 @@ class PostgresEventStoreIT {
 
     @DynamicPropertySource
     static void overrideProperties(DynamicPropertyRegistry registry) {
-        registry.add(
-                "spring.r2dbc.url",
-                () -> "r2dbc:postgresql://%s:%s/%s".formatted(postgres.getHost(), postgres.getFirstMappedPort(),
-                        postgres.getDatabaseName()));
-        registry.add("spring.r2dbc.username", () -> postgres.getUsername());
-        registry.add("spring.r2dbc.password", () -> postgres.getPassword());
-
         registry.add(
                 "schema.registry.url",
                 () -> "http://%s:%s".formatted(schemaRegistry.getHost(), schemaRegistry.getFirstMappedPort()));
@@ -161,20 +152,12 @@ class PostgresEventStoreIT {
     }
 
     @BeforeEach
-    void setUp(@Value("classpath:/test-data/events/ddl.sql") Resource ddl) {
+    void setUp(@Value("classpath:/test-data/events/ddl.sql") Resource ddl) throws IOException {
         databaseClient
-                .sql(getContentAsString(ddl))
+                .sql(ddl.getContentAsString(StandardCharsets.UTF_8))
                 .fetch()
                 .rowsUpdated()
                 .block();
-    }
-
-    private String getContentAsString(Resource resource) {
-        try (Reader reader = new InputStreamReader(resource.getInputStream(), StandardCharsets.UTF_8)) {
-            return FileCopyUtils.copyToString(reader);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
     }
 
     @Test
