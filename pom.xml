@@ -50,16 +50,16 @@
 
     <properties>
         <!-- Kafka Avro Serializer -->
-        <kafka.avro.serializer.version>7.3.1</kafka.avro.serializer.version>
+        <kafka.avro.serializer.version>7.4.0</kafka.avro.serializer.version>
 
         <!-- Kafka Streams Avro SerDe -->
-        <kafka.streams.avro.serde.version>7.3.1</kafka.streams.avro.serde.version>
+        <kafka.streams.avro.serde.version>7.4.0</kafka.streams.avro.serde.version>
 
         <!-- Apache Avro -->
-        <avro.version>1.11.1</avro.version>
+        <avro.version>1.11.3</avro.version>
 
         <!-- JaCoCo -->
-        <jacoco.version>0.8.8</jacoco.version>
+        <jacoco.version>0.8.11</jacoco.version>
 
         <!-- Maven GPG Plugin -->
         <gpg.plugin.version>3.0.1</gpg.plugin.version>
