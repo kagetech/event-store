@@ -91,13 +91,14 @@ class KafkaStreamsEventStoreIT {
 
     @SuppressWarnings("resource")
     @Container
-    static final KafkaContainer kafka = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.3.1"))
-            .withNetwork(network);
+    static final KafkaContainer kafka = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.6.1"))
+            .withNetwork(network)
+            .withKraft();
 
     @SuppressWarnings("resource")
     @Container
     static final GenericContainer<?> schemaRegistry = new GenericContainer<>(
-            DockerImageName.parse("confluentinc/cp-schema-registry:7.3.1"))
+            DockerImageName.parse("confluentinc/cp-schema-registry:7.6.1"))
             .dependsOn(kafka)
             .withNetwork(network)
             .withExposedPorts(8081)
