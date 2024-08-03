@@ -14,13 +14,13 @@ Uses [Apache Avro](https://avro.apache.org/) for payload serialization and store
 <dependency>
     <groupId>tech.kage.event</groupId>
     <artifactId>tech.kage.event</artifactId>
-    <version>1.0.0</version>
+    <version>1.1.0</version>
 </dependency>
 
 <dependency>
     <groupId>tech.kage.event</groupId>
     <artifactId>tech.kage.event.kafka.streams</artifactId>
-    <version>1.0.0</version>
+    <version>1.1.0</version>
 </dependency>
 ```
 
