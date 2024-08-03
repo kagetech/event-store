@@ -32,6 +32,7 @@ module tech.kage.event.postgres {
     requires tech.kage.event;
 
     requires spring.beans;
+    requires spring.boot.autoconfigure;
     requires spring.context;
     requires spring.core;
 

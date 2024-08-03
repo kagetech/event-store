@@ -25,7 +25,15 @@
 
 package tech.kage.event.postgres;
 
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+import java.util.Map;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.context.annotation.Bean;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.GenericContainer;
@@ -38,12 +46,13 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 /**
- * Integration tests for {@link PostgresEventStore} with default configuration.
+ * Integration tests for {@link PostgresEventStore} configured with
+ * {@link KafkaProperties}.
  * 
  * @author Dariusz Szpakowski
  */
 @Testcontainers
-class PostgresEventStoreIT extends AbstractPostgresEventStoreIT {
+class PostgresEventStoreWithKafkaPropertiesIT extends AbstractPostgresEventStoreIT {
     static final Network network = Network.newNetwork();
 
     @Container
@@ -77,5 +86,17 @@ class PostgresEventStoreIT extends AbstractPostgresEventStoreIT {
     }
 
     static class TestConfiguration extends AbstractPostgresEventStoreIT.TestConfiguration {
+        @Bean
+        KafkaProperties kafkaProperties(@Value("${schema.registry.url}") String schemaRegistryUrl) {
+            var kafkaProperties = mock(KafkaProperties.class);
+
+            var serializerConfig = Map.of(
+                    "schema.registry.url", schemaRegistryUrl,
+                    "value.subject.name.strategy", "io.confluent.kafka.serializers.subject.RecordNameStrategy");
+
+            when(kafkaProperties.getProperties()).thenReturn(serializerConfig);
+
+            return kafkaProperties;
+        }
     }
 }

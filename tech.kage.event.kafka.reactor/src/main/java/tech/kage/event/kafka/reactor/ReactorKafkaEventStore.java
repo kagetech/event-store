@@ -240,6 +240,17 @@ public class ReactorKafkaEventStore implements EventStore {
 
     @Configuration
     static class Config {
+        private static final String KEY_SERIALIZER_CLASS = "org.apache.kafka.common.serialization.UUIDSerializer";
+        private static final String VALUE_SERIALIZER_CLASS = "io.confluent.kafka.serializers.KafkaAvroSerializer";
+
+        private static final String KEY_DESERIALIZER_CLASS = "org.apache.kafka.common.serialization.UUIDDeserializer";
+        private static final String VALUE_DESERIALIZER_CLASS = "io.confluent.kafka.serializers.KafkaAvroDeserializer";
+
+        private static final String VALUE_SUBJECT_NAME_STRATEGY_CONFIG = "value.subject.name.strategy";
+        private static final String VALUE_SUBJECT_NAME_STRATEGY = "io.confluent.kafka.serializers.subject.RecordNameStrategy";
+
+        private static final String SPECIFIC_AVRO_READER_CONFIG = "specific.avro.reader";
+
         @Bean
         KafkaSender<UUID, SpecificRecord> kafkaSender(SenderOptions<UUID, SpecificRecord> senderOptions) {
             return KafkaSender.create(senderOptions);
@@ -249,12 +260,9 @@ public class ReactorKafkaEventStore implements EventStore {
         SenderOptions<UUID, SpecificRecord> kafkaSenderOptions(KafkaProperties properties) {
             var props = properties.buildProducerProperties(null);
 
-            props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
-                    "org.apache.kafka.common.serialization.UUIDSerializer");
-            props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
-                    "io.confluent.kafka.serializers.KafkaAvroSerializer");
-            props.put("value.subject.name.strategy",
-                    "io.confluent.kafka.serializers.subject.RecordNameStrategy");
+            props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, KEY_SERIALIZER_CLASS);
+            props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, VALUE_SERIALIZER_CLASS);
+            props.putIfAbsent(VALUE_SUBJECT_NAME_STRATEGY_CONFIG, VALUE_SUBJECT_NAME_STRATEGY);
 
             return SenderOptions.create(props);
         }
@@ -266,12 +274,10 @@ public class ReactorKafkaEventStore implements EventStore {
             props.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_committed");
             props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
             props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-            props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,
-                    "org.apache.kafka.common.serialization.UUIDDeserializer");
-            props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
-                    "io.confluent.kafka.serializers.KafkaAvroDeserializer");
-            props.put("specific.avro.reader", "true");
-            props.put("value.subject.name.strategy", "io.confluent.kafka.serializers.subject.RecordNameStrategy");
+            props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, KEY_DESERIALIZER_CLASS);
+            props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, VALUE_DESERIALIZER_CLASS);
+            props.putIfAbsent(SPECIFIC_AVRO_READER_CONFIG, "true");
+            props.putIfAbsent(VALUE_SUBJECT_NAME_STRATEGY_CONFIG, VALUE_SUBJECT_NAME_STRATEGY);
 
             return ReceiverOptions.create(props);
         }

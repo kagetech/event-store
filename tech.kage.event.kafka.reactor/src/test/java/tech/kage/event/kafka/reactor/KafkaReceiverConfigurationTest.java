@@ -27,6 +27,10 @@ package tech.kage.event.kafka.reactor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.Map;
+
+import org.apache.kafka.common.serialization.ByteArrayDeserializer;
+import org.apache.kafka.common.serialization.StringDeserializer;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 
@@ -40,7 +44,7 @@ class KafkaReceiverConfigurationTest {
     ReactorKafkaEventStore.Config config = new ReactorKafkaEventStore.Config();
 
     @Test
-    void createsReceiverConfiguration() {
+    void createsDefaultReceiverConfiguration() {
         // Given
         var kafkaProperties = new KafkaProperties();
 
@@ -51,6 +55,77 @@ class KafkaReceiverConfigurationTest {
         var expectedKeyDeserializer = "org.apache.kafka.common.serialization.UUIDDeserializer";
         var expectedValueDeserializer = "io.confluent.kafka.serializers.KafkaAvroDeserializer";
         var expectedValueSubjectNameStrategy = "io.confluent.kafka.serializers.subject.RecordNameStrategy";
+
+        // When
+        var receiverOptions = config.kafkaReceiverOptions(kafkaProperties);
+
+        // Then
+        var consumerProperties = receiverOptions.consumerProperties();
+
+        assertThat(consumerProperties.get("isolation.level"))
+                .describedAs("isolation level")
+                .isEqualTo(expectedIsolationLevel);
+
+        assertThat(consumerProperties.get("enable.auto.commit"))
+                .describedAs("enable auto commit")
+                .isEqualTo(expectedEnableAutoCommit);
+
+        assertThat(consumerProperties.get("auto.offset.reset"))
+                .describedAs("auto offset reset")
+                .isEqualTo(expectedAutoOffsetReset);
+
+        assertThat(consumerProperties.get("specific.avro.reader"))
+                .describedAs("specific avro reader")
+                .isEqualTo(expectedSpecificAvroReader);
+
+        assertThat(consumerProperties.get("key.deserializer"))
+                .describedAs("key deserializer")
+                .isEqualTo(expectedKeyDeserializer);
+
+        assertThat(consumerProperties.get("value.deserializer"))
+                .describedAs("value deserializer")
+                .isEqualTo(expectedValueDeserializer);
+
+        assertThat(consumerProperties.get("value.subject.name.strategy"))
+                .describedAs("value subject name strategy")
+                .isEqualTo(expectedValueSubjectNameStrategy);
+    }
+
+    @Test
+    void allowsOverridingDefaultReceiverConfiguration() {
+        // Given
+        var kafkaProperties = new KafkaProperties();
+
+        var isolationLevel = KafkaProperties.IsolationLevel.READ_UNCOMMITTED;
+        var enableAutoCommit = true;
+        var autoOffsetReset = "latest";
+        var specificAvroReader = "true";
+        var keyDeserializer = StringDeserializer.class;
+        var valueDeserializer = ByteArrayDeserializer.class;
+        var valueSubjectNameStrategy = "io.confluent.kafka.serializers.subject.TopicNameStrategy";
+
+        var consumerConfig = kafkaProperties.getConsumer();
+
+        consumerConfig.setIsolationLevel(isolationLevel);
+        consumerConfig.setEnableAutoCommit(enableAutoCommit);
+        consumerConfig.setAutoOffsetReset(autoOffsetReset);
+        consumerConfig.setKeyDeserializer(keyDeserializer);
+        consumerConfig.setValueDeserializer(valueDeserializer);
+
+        kafkaProperties
+                .getProperties()
+                .putAll(
+                        Map.of(
+                                "specific.avro.reader", specificAvroReader,
+                                "value.subject.name.strategy", valueSubjectNameStrategy));
+
+        var expectedIsolationLevel = "read_committed";
+        var expectedEnableAutoCommit = "false";
+        var expectedAutoOffsetReset = "earliest";
+        var expectedSpecificAvroReader = specificAvroReader;
+        var expectedKeyDeserializer = "org.apache.kafka.common.serialization.UUIDDeserializer";
+        var expectedValueDeserializer = "io.confluent.kafka.serializers.KafkaAvroDeserializer";
+        var expectedValueSubjectNameStrategy = valueSubjectNameStrategy;
 
         // When
         var receiverOptions = config.kafkaReceiverOptions(kafkaProperties);

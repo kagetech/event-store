@@ -27,7 +27,10 @@ package tech.kage.event.kafka.streams;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.List;
+
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 
 /**
  * Tests of Kafka Streams configuration.
@@ -42,16 +45,21 @@ class KafkaStreamsConfigurationTest {
     void createsKafkaStreamsConfig() {
         // Given
         var applicationId = "test-app";
-        var bootstrapServers = "localhost:9092";
-        var schemaRegistryUrl = "http://localhost:8989";
 
+        var kafkaProperties = new KafkaProperties();
+
+        kafkaProperties.setBootstrapServers(List.of("localhost:9092"));
+        kafkaProperties.getProperties().put("schema.registry.url", "http://localhost:8989");
+
+        var expectedBootstrapServers = "localhost:9092";
+        var expectedSchemaRegistryUrl = "http://localhost:8989";
         var expectedKeySerde = "org.apache.kafka.common.serialization.Serdes$UUIDSerde";
         var expectedValueSerde = "io.confluent.kafka.streams.serdes.avro.SpecificAvroSerde";
         var expectedProcessingGuarantee = "exactly_once_v2";
         var expectedValueSubjectNameStrategy = "io.confluent.kafka.serializers.subject.RecordNameStrategy";
 
         // When
-        var kStreamsConfig = config.kStreamsConfig(applicationId, bootstrapServers, schemaRegistryUrl);
+        var kStreamsConfig = config.kStreamsConfig(kafkaProperties, applicationId);
 
         // Then
         var configurationProperties = kStreamsConfig.asProperties();
@@ -62,11 +70,11 @@ class KafkaStreamsConfigurationTest {
 
         assertThat(configurationProperties.get("bootstrap.servers"))
                 .describedAs("bootstrap servers")
-                .isEqualTo(bootstrapServers);
+                .isEqualTo(expectedBootstrapServers);
 
         assertThat(configurationProperties.get("schema.registry.url"))
                 .describedAs("schema registry url")
-                .isEqualTo(schemaRegistryUrl);
+                .isEqualTo(expectedSchemaRegistryUrl);
 
         assertThat(configurationProperties.get("default.key.serde"))
                 .describedAs("key serde")
