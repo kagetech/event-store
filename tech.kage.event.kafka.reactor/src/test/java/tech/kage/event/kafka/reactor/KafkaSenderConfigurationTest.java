@@ -27,6 +27,8 @@ package tech.kage.event.kafka.reactor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import org.apache.kafka.common.serialization.ByteArraySerializer;
+import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 
@@ -40,13 +42,54 @@ class KafkaSenderConfigurationTest {
     ReactorKafkaEventStore.Config config = new ReactorKafkaEventStore.Config();
 
     @Test
-    void createsSenderConfiguration() {
+    void createsDefaultSenderConfiguration() {
         // Given
         var kafkaProperties = new KafkaProperties();
 
         var expectedKeySerializer = "org.apache.kafka.common.serialization.UUIDSerializer";
         var expectedValueSerializer = "io.confluent.kafka.serializers.KafkaAvroSerializer";
         var expectedValueSubjectNameStrategy = "io.confluent.kafka.serializers.subject.RecordNameStrategy";
+
+        // When
+        var senderOptions = config.kafkaSenderOptions(kafkaProperties);
+
+        // Then
+        var producerProperties = senderOptions.producerProperties();
+
+        assertThat(producerProperties.get("key.serializer"))
+                .describedAs("key serializer")
+                .isEqualTo(expectedKeySerializer);
+
+        assertThat(producerProperties.get("value.serializer"))
+                .describedAs("value serializer")
+                .isEqualTo(expectedValueSerializer);
+
+        assertThat(producerProperties.get("value.subject.name.strategy"))
+                .describedAs("value subject name strategy")
+                .isEqualTo(expectedValueSubjectNameStrategy);
+    }
+
+    @Test
+    void allowsOverridingDefaultSenderConfiguration() {
+        // Given
+        var kafkaProperties = new KafkaProperties();
+
+        var keySerializer = StringSerializer.class;
+        var valueSerializer = ByteArraySerializer.class;
+        var valueSubjectNameStrategy = "io.confluent.kafka.serializers.subject.TopicNameStrategy";
+
+        var producerConfig = kafkaProperties.getProducer();
+
+        producerConfig.setKeySerializer(keySerializer);
+        producerConfig.setValueSerializer(valueSerializer);
+
+        kafkaProperties
+                .getProperties()
+                .put("value.subject.name.strategy", valueSubjectNameStrategy);
+
+        var expectedKeySerializer = "org.apache.kafka.common.serialization.UUIDSerializer";
+        var expectedValueSerializer = "io.confluent.kafka.serializers.KafkaAvroSerializer";
+        var expectedValueSubjectNameStrategy = valueSubjectNameStrategy;
 
         // When
         var senderOptions = config.kafkaSenderOptions(kafkaProperties);

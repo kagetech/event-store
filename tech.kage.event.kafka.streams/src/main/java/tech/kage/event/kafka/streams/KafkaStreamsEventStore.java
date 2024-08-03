@@ -166,7 +166,7 @@ public class KafkaStreamsEventStore implements EventStore {
 
             props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, KEY_SERIALIZER_CLASS);
             props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, VALUE_SERIALIZER_CLASS);
-            props.put(VALUE_SUBJECT_NAME_STRATEGY_CONFIG, VALUE_SUBJECT_NAME_STRATEGY);
+            props.putIfAbsent(VALUE_SUBJECT_NAME_STRATEGY_CONFIG, VALUE_SUBJECT_NAME_STRATEGY);
 
             var factory = new DefaultKafkaProducerFactory<>(props);
 
@@ -181,18 +181,19 @@ public class KafkaStreamsEventStore implements EventStore {
 
         @Bean(name = KafkaStreamsDefaultConfiguration.DEFAULT_STREAMS_CONFIG_BEAN_NAME)
         KafkaStreamsConfiguration kStreamsConfig(
-                @Value(value = "${kafka.streams.application.id}") String applicationId,
-                @Value(value = "${spring.kafka.bootstrap-servers}") String bootstrapServers,
-                @Value(value = "${spring.kafka.properties.schema.registry.url}") String schemaRegistryUrl) {
+                KafkaProperties properties,
+                @Value(value = "${kafka.streams.application.id}") String applicationId) {
             var props = new HashMap<String, Object>();
 
             props.put(StreamsConfig.APPLICATION_ID_CONFIG, applicationId);
-            props.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+            props.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, String.join(",", properties.getBootstrapServers()));
             props.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.UUID().getClass().getName());
             props.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, DEFAULT_VALUE_SERDE_CLASS);
             props.put(StreamsConfig.PROCESSING_GUARANTEE_CONFIG, StreamsConfig.EXACTLY_ONCE_V2);
-            props.put(SCHEMA_REGISTRY_URL_CONFIG, schemaRegistryUrl);
-            props.put(VALUE_SUBJECT_NAME_STRATEGY_CONFIG, VALUE_SUBJECT_NAME_STRATEGY);
+            props.put(SCHEMA_REGISTRY_URL_CONFIG, properties.getProperties().get(SCHEMA_REGISTRY_URL_CONFIG));
+            props.put(VALUE_SUBJECT_NAME_STRATEGY_CONFIG,
+                    properties.getProperties().get(VALUE_SUBJECT_NAME_STRATEGY_CONFIG));
+            props.putIfAbsent(VALUE_SUBJECT_NAME_STRATEGY_CONFIG, VALUE_SUBJECT_NAME_STRATEGY);
 
             return new KafkaStreamsConfiguration(props);
         }
