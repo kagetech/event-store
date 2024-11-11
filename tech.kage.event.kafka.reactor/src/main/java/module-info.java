@@ -30,7 +30,7 @@
  * @author Dariusz Szpakowski
  */
 module tech.kage.event.kafka.reactor {
-    requires tech.kage.event;
+    requires transitive tech.kage.event;
 
     requires spring.boot.autoconfigure;
 
