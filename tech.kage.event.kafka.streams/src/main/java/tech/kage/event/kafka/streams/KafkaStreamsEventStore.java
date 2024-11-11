@@ -151,8 +151,6 @@ public class KafkaStreamsEventStore implements EventStore {
     @Configuration
     @EnableKafkaStreams
     static class Config {
-        private static final String SCHEMA_REGISTRY_URL_CONFIG = "schema.registry.url";
-
         private static final String KEY_SERIALIZER_CLASS = "org.apache.kafka.common.serialization.UUIDSerializer";
         private static final String VALUE_SERIALIZER_CLASS = "io.confluent.kafka.serializers.KafkaAvroSerializer";
 
@@ -183,16 +181,13 @@ public class KafkaStreamsEventStore implements EventStore {
         KafkaStreamsConfiguration kStreamsConfig(
                 KafkaProperties properties,
                 @Value(value = "${kafka.streams.application.id}") String applicationId) {
-            var props = new HashMap<String, Object>();
+            var props = new HashMap<String, Object>(properties.getProperties());
 
             props.put(StreamsConfig.APPLICATION_ID_CONFIG, applicationId);
             props.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, String.join(",", properties.getBootstrapServers()));
             props.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.UUID().getClass().getName());
             props.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, DEFAULT_VALUE_SERDE_CLASS);
             props.put(StreamsConfig.PROCESSING_GUARANTEE_CONFIG, StreamsConfig.EXACTLY_ONCE_V2);
-            props.put(SCHEMA_REGISTRY_URL_CONFIG, properties.getProperties().get(SCHEMA_REGISTRY_URL_CONFIG));
-            props.put(VALUE_SUBJECT_NAME_STRATEGY_CONFIG,
-                    properties.getProperties().get(VALUE_SUBJECT_NAME_STRATEGY_CONFIG));
             props.putIfAbsent(VALUE_SUBJECT_NAME_STRATEGY_CONFIG, VALUE_SUBJECT_NAME_STRATEGY);
 
             return new KafkaStreamsConfiguration(props);
