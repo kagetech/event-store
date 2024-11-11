@@ -134,7 +134,7 @@ class EventReplicator {
         }
 
         // create progress Kafka topic
-        kafkaAdmin.createOrModifyTopics(TopicBuilder.name(PROGRESS_TOPIC).compact().build());
+        kafkaAdmin.createOrModifyTopics(TopicBuilder.name(PROGRESS_TOPIC).partitions(1).compact().build());
 
         log.info("Reading last replicated event id");
 
