@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023, Dariusz Szpakowski
+ * Copyright (c) 2023-2024, Dariusz Szpakowski
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -27,8 +27,12 @@ package tech.kage.event.replicator.entity;
 
 import java.nio.ByteBuffer;
 import java.sql.Timestamp;
+import java.util.List;
 import java.util.UUID;
 
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.header.Header;
+import org.apache.kafka.common.header.internals.RecordHeader;
 import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -50,6 +54,11 @@ class EventReplicatorWorker implements Runnable {
                 ORDER BY id
                 LIMIT %s
             """;
+
+    /**
+     * Kafka record header storing the id of an event in the source database.
+     */
+    private static final String RECORD_HEADER_ID = "id";
 
     /**
      * Configuration property defining the maximum number of events replicated in
@@ -141,9 +150,10 @@ class EventReplicatorWorker implements Runnable {
                 var key = (UUID) event.get("key");
                 var data = (byte[]) event.get("data");
                 var timestamp = (Timestamp) event.get("timestamp");
+                var headers = List.<Header>of(new RecordHeader(RECORD_HEADER_ID, Long.toString(newLastId).getBytes()));
 
                 // send event to Kafka topic
-                kafka.send(topic, null, timestamp.getTime(), key.toString(), data);
+                kafka.send(new ProducerRecord<>(topic, null, timestamp.getTime(), key.toString(), data, headers));
             }
 
             // update progress topic
