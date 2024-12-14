@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023, Dariusz Szpakowski
+ * Copyright (c) 2023-2024, Dariusz Szpakowski
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -171,6 +171,10 @@ class EventReplicatorWorkerIT {
                     assertThat(replicatedEvent.timestamp())
                             .describedAs("replicated event timestamp")
                             .isEqualTo(sourceEvent.timestamp().toEpochMilli());
+
+                    assertThat(new String(replicatedEvent.headers().lastHeader("id").value()))
+                            .describedAs("replicated event id header")
+                            .isEqualTo(Long.toString(sourceEvent.id()));
                 });
     }
 
@@ -211,6 +215,10 @@ class EventReplicatorWorkerIT {
                     assertThat(replicatedEvent.timestamp())
                             .describedAs("replicated event timestamp")
                             .isEqualTo(sourceEvent.timestamp().toEpochMilli());
+
+                    assertThat(new String(replicatedEvent.headers().lastHeader("id").value()))
+                            .describedAs("replicated event id header")
+                            .isEqualTo(Long.toString(sourceEvent.id()));
                 });
     }
 
@@ -253,6 +261,10 @@ class EventReplicatorWorkerIT {
                     assertThat(replicatedEvent.timestamp())
                             .describedAs("replicated event timestamp")
                             .isEqualTo(sourceEvent.timestamp().toEpochMilli());
+
+                    assertThat(new String(replicatedEvent.headers().lastHeader("id").value()))
+                            .describedAs("replicated event id header")
+                            .isEqualTo(Long.toString(sourceEvent.id()));
                 });
     }
 
