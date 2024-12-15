@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023, Dariusz Szpakowski
+ * Copyright (c) 2023-2024, Dariusz Szpakowski
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -28,6 +28,7 @@ package tech.kage.event;
 import static java.time.temporal.ChronoUnit.MILLIS;
 
 import java.time.Instant;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -40,28 +41,32 @@ import org.apache.avro.specific.SpecificRecord;
  * @param key       the {@code Event}'s key
  * @param payload   the {@code Event}'s payload
  * @param timestamp the {@code Event}'s timestamp
+ * @param metadata  the {@code Event}'s metadata
  *
  * @author Dariusz Szpakowski
  */
-public record Event<T extends SpecificRecord>(UUID key, T payload, Instant timestamp) {
+public record Event<T extends SpecificRecord>(UUID key, T payload, Instant timestamp, Map<String, Object> metadata) {
     /**
      * Creates an {@link Event} with a given key, payload and timestamp.
      *
      * @param key       the {@code Event}'s key
      * @param payload   the {@code Event}'s payload
      * @param timestamp the {@code Event}'s timestamp
+     * @param metadata  the {@code Event}'s metadata
      *
-     * @throws NullPointerException if the specified key, payload or timestamp is
-     *                              null
+     * @throws NullPointerException if the specified key, payload, timestamp or
+     *                              metadata is null
      */
-    public Event(UUID key, T payload, Instant timestamp) {
+    public Event(UUID key, T payload, Instant timestamp, Map<String, Object> metadata) {
         Objects.requireNonNull(key, "key must not be null");
         Objects.requireNonNull(payload, "payload must not be null");
         Objects.requireNonNull(timestamp, "timestamp must not be null");
+        Objects.requireNonNull(metadata, "metadata must not be null");
 
         this.key = key;
         this.payload = payload;
         this.timestamp = timestamp.truncatedTo(MILLIS);
+        this.metadata = metadata;
     }
 
     /**
@@ -70,8 +75,9 @@ public record Event<T extends SpecificRecord>(UUID key, T payload, Instant times
      * @param <T>     the {@code Event}'s payload type
      * @param payload the {@code Event}'s payload
      *
-     * @return an {@link Event} with the specified payload, a random key and
-     *         timestamp set to current time truncated to milliseconds
+     * @return an {@link Event} with the specified payload, a random key, timestamp
+     *         set to current time truncated to milliseconds and an empty metadata
+     *         map
      * 
      * @throws NullPointerException if the specified payload is null
      */
@@ -86,8 +92,8 @@ public record Event<T extends SpecificRecord>(UUID key, T payload, Instant times
      * @param key     the {@code Event}'s key
      * @param payload the {@code Event}'s payload
      *
-     * @return an {@link Event} with the specified key and payload and timestamp set
-     *         to current time truncated to milliseconds
+     * @return an {@link Event} with the specified key, payload, timestamp set to
+     *         current time truncated to milliseconds and an empty metadata map
      * 
      * @throws NullPointerException if the specified key or payload is null
      */
@@ -103,13 +109,36 @@ public record Event<T extends SpecificRecord>(UUID key, T payload, Instant times
      * @param payload   the {@code Event}'s payload
      * @param timestamp the {@code Event}'s timestamp
      *
-     * @return an {@link Event} with the specified key, payload and timestamp
-     *         truncated to milliseconds
+     * @return an {@link Event} with the specified key, payload, timestamp truncated
+     *         to milliseconds and an empty metadata map
      * 
      * @throws NullPointerException if the specified key, payload or timestamp is
      *                              null
      */
     public static <T extends SpecificRecord> Event<T> from(UUID key, T payload, Instant timestamp) {
-        return new Event<>(key, payload, timestamp);
+        return new Event<>(key, payload, timestamp, Map.of());
+    }
+
+    /**
+     * Creates an {@link Event} with a given key, payload, timestamp and metadata.
+     *
+     * @param <T>       the {@code Event}'s payload type
+     * @param key       the {@code Event}'s key
+     * @param payload   the {@code Event}'s payload
+     * @param timestamp the {@code Event}'s timestamp
+     * @param metadata  the {@code Event}'s metadata
+     *
+     * @return an {@link Event} with the specified key, payload, timestamp truncated
+     *         to milliseconds and metadata map
+     * 
+     * @throws NullPointerException if the specified key, payload, timestamp or
+     *                              metadata is null
+     */
+    public static <T extends SpecificRecord> Event<T> from(
+            UUID key,
+            T payload,
+            Instant timestamp,
+            Map<String, Object> metadata) {
+        return new Event<>(key, payload, timestamp, metadata);
     }
 }

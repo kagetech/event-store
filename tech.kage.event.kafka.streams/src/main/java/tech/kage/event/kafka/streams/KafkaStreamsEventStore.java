@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023, Dariusz Szpakowski
+ * Copyright (c) 2023-2024, Dariusz Szpakowski
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -26,9 +26,11 @@
 package tech.kage.event.kafka.streams;
 
 import java.time.Instant;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -43,6 +45,7 @@ import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.kstream.Named;
 import org.apache.kafka.streams.processor.api.ContextualFixedKeyProcessor;
 import org.apache.kafka.streams.processor.api.FixedKeyRecord;
+import org.apache.kafka.streams.processor.api.RecordMetadata;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.context.annotation.Bean;
@@ -83,6 +86,10 @@ import tech.kage.event.EventStore;
  */
 @Component
 public class KafkaStreamsEventStore implements EventStore {
+    private static final String METADATA_PARTITION = "partition";
+    private static final String METADATA_OFFSET = "offset";
+    private static final String METADATA_HEADER_PREFIX = "header.";
+
     private final KafkaTemplate<UUID, Object> kafkaTemplate;
     private final StreamsBuilder streamsBuilder;
 
@@ -136,7 +143,7 @@ public class KafkaStreamsEventStore implements EventStore {
     /**
      * Transformer of Kafka Streams Records into {@link Event} instances.
      */
-    class EventTransformer extends ContextualFixedKeyProcessor<UUID, SpecificRecord, Event<SpecificRecord>> {
+    static class EventTransformer extends ContextualFixedKeyProcessor<UUID, SpecificRecord, Event<SpecificRecord>> {
         @Override
         public void process(FixedKeyRecord<UUID, SpecificRecord> message) {
             context().forward(
@@ -144,7 +151,27 @@ public class KafkaStreamsEventStore implements EventStore {
                             Event.from(
                                     message.key(),
                                     message.value(),
-                                    Instant.ofEpochMilli(message.timestamp()))));
+                                    timestamp(message),
+                                    metadata(message, context().recordMetadata()))));
+        }
+
+        private Instant timestamp(FixedKeyRecord<UUID, SpecificRecord> message) {
+            return Instant.ofEpochMilli(message.timestamp());
+        }
+
+        private Map<String, Object> metadata(FixedKeyRecord<?, ?> message, Optional<RecordMetadata> recordMetadata) {
+            var metadataMap = new HashMap<String, Object>();
+
+            if (recordMetadata.isPresent()) {
+                metadataMap.put(METADATA_PARTITION, recordMetadata.get().partition());
+                metadataMap.put(METADATA_OFFSET, recordMetadata.get().offset());
+            }
+
+            for (var header : message.headers()) {
+                metadataMap.put(METADATA_HEADER_PREFIX + header.key(), header.value());
+            }
+
+            return Collections.unmodifiableMap(metadataMap);
         }
     }
 
