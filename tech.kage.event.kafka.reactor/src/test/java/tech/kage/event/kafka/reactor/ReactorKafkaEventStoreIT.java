@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023, Dariusz Szpakowski
+ * Copyright (c) 2023-2024, Dariusz Szpakowski
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -30,6 +30,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Collections;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.IntStream;
 
@@ -203,6 +204,17 @@ class ReactorKafkaEventStoreIT {
 
         var savedEvents = Flux.concat(events.stream().map(event -> eventStore.save(topic, event)).toList());
 
+        var expectedEvents = IntStream
+                .range(0, events.size())
+                .boxed()
+                .map(i -> {
+                    var event = events.get(i);
+                    var metadata = Map.<String, Object>of("partition", 0, "offset", Long.valueOf(i));
+
+                    return Event.from(event.key(), event.payload(), event.timestamp(), metadata);
+                })
+                .toList();
+
         // When
         var retrievedEvents = eventStore
                 .subscribe(topic)
@@ -213,7 +225,7 @@ class ReactorKafkaEventStoreIT {
         // Then
         StepVerifier
                 .create(savedEvents.thenMany(retrievedEvents))
-                .expectNextSequence(events)
+                .expectNextSequence(expectedEvents)
                 .as("retrieves stored events with the same data")
                 .verifyComplete();
     }
@@ -237,7 +249,16 @@ class ReactorKafkaEventStoreIT {
                 .concatMap(event -> event.as(transactionalOperator::transactional))
                 .take(events.size() - 3);
 
-        var expectedEvents = events.subList(events.size() - 3, events.size());
+        var expectedEvents = IntStream
+                .range(events.size() - 3, events.size())
+                .boxed()
+                .map(i -> {
+                    var event = events.get(i);
+                    var metadata = Map.<String, Object>of("partition", 0, "offset", Long.valueOf(i));
+
+                    return Event.from(event.key(), event.payload(), event.timestamp(), metadata);
+                })
+                .toList();
 
         // When
         var secondBatch = eventStore

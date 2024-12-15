@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023, Dariusz Szpakowski
+ * Copyright (c) 2023-2024, Dariusz Szpakowski
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -27,7 +27,10 @@ package tech.kage.event.kafka.reactor;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -95,6 +98,10 @@ public class ReactorKafkaEventStore implements EventStore {
     private static final String TOPIC_COLUMN = "topic";
     private static final String PARTITION_COLUMN = "partition";
     private static final String OFFSET_COLUMN = "offset";
+
+    private static final String METADATA_PARTITION = "partition";
+    private static final String METADATA_OFFSET = "offset";
+    private static final String METADATA_HEADER_PREFIX = "header.";
 
     private final KafkaSender<UUID, SpecificRecord> kafkaSender;
     private final ReceiverOptions<UUID, SpecificRecord> kafkaReceiverOptions;
@@ -217,8 +224,7 @@ public class ReactorKafkaEventStore implements EventStore {
      * @return consumed event
      */
     private Mono<Event<SpecificRecord>> consume(ReceiverRecord<UUID, SpecificRecord> event) {
-        return saveOffset(event)
-                .then(Mono.just(Event.from(event.key(), event.value(), Instant.ofEpochMilli(event.timestamp()))));
+        return saveOffset(event).map(ReactorKafkaEventStore::transform);
     }
 
     /**
@@ -228,14 +234,36 @@ public class ReactorKafkaEventStore implements EventStore {
      * 
      * @return 1 if updated successfully, 0 otherwise
      */
-    private Mono<Long> saveOffset(ReceiverRecord<UUID, SpecificRecord> event) {
+    private Mono<ReceiverRecord<UUID, SpecificRecord>> saveOffset(ReceiverRecord<UUID, SpecificRecord> event) {
         return databaseClient
                 .sql(UPDATE_OFFSET_SQL.formatted(eventSchema))
                 .bind(TOPIC_COLUMN, event.topic())
                 .bind(PARTITION_COLUMN, event.partition())
                 .bind(OFFSET_COLUMN, event.offset())
                 .fetch()
-                .rowsUpdated();
+                .rowsUpdated()
+                .thenReturn(event);
+    }
+
+    static Event<SpecificRecord> transform(ReceiverRecord<UUID, SpecificRecord> event) {
+        return Event.from(event.key(), event.value(), timestamp(event), metadata(event));
+    }
+
+    private static Instant timestamp(ReceiverRecord<UUID, SpecificRecord> event) {
+        return Instant.ofEpochMilli(event.timestamp());
+    }
+
+    private static Map<String, Object> metadata(ReceiverRecord<UUID, SpecificRecord> event) {
+        var metadataMap = new HashMap<String, Object>();
+
+        metadataMap.put(METADATA_PARTITION, event.partition());
+        metadataMap.put(METADATA_OFFSET, event.offset());
+
+        for (var header : event.headers()) {
+            metadataMap.put(METADATA_HEADER_PREFIX + header.key(), header.value());
+        }
+
+        return Collections.unmodifiableMap(metadataMap);
     }
 
     @Configuration
