@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023, Dariusz Szpakowski
+ * Copyright (c) 2023-2024, Dariusz Szpakowski
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -74,6 +74,8 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import io.micrometer.core.instrument.MeterRegistry;
+
 /**
  * Integration tests for {@link EventReplicator}.
  * 
@@ -99,6 +101,9 @@ class EventReplicatorIT {
 
     @Autowired
     ConsumerFactory<String, byte[]> consumerFactory;
+
+    @Autowired
+    MeterRegistry meterRegistry;
 
     @Autowired
     Environment environment;
@@ -159,7 +164,7 @@ class EventReplicatorIT {
     @Order(1)
     void preparesReplicatedEventTopics() {
         // When
-        eventReplicator.init(kafkaAdmin, jdbcTemplate, consumerFactory, environment, pollInterval, true);
+        eventReplicator.init(kafkaAdmin, jdbcTemplate, consumerFactory, meterRegistry, environment, pollInterval, true);
 
         // Then
         assertThatCode(() -> kafkaAdmin.describeTopics(topicLastIds.keySet().toArray(String[]::new)))
@@ -188,7 +193,7 @@ class EventReplicatorIT {
         var expectedDelay = Duration.ofMillis(pollInterval);
 
         // When
-        eventReplicator.init(kafkaAdmin, jdbcTemplate, consumerFactory, environment, pollInterval, true);
+        eventReplicator.init(kafkaAdmin, jdbcTemplate, consumerFactory, meterRegistry, environment, pollInterval, true);
 
         // Then
         var taskCaptor = ArgumentCaptor.forClass(Runnable.class);
@@ -223,7 +228,8 @@ class EventReplicatorIT {
         // When
         var thrown = Assertions.assertThrows(
                 IllegalStateException.class,
-                () -> eventReplicator.init(kafkaAdmin, jdbcTemplate, consumerFactory, environment, pollInterval, true));
+                () -> eventReplicator.init(
+                        kafkaAdmin, jdbcTemplate, consumerFactory, meterRegistry, environment, pollInterval, true));
 
         // Then
         assertThat(thrown.getMessage())

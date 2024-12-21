@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023, Dariusz Szpakowski
+ * Copyright (c) 2023-2024, Dariusz Szpakowski
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -47,6 +47,8 @@ import org.springframework.kafka.core.KafkaAdmin;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.stereotype.Component;
+
+import io.micrometer.core.instrument.MeterRegistry;
 
 /**
  * Component responsible for coordination of event replication process. Uses
@@ -117,14 +119,18 @@ class EventReplicator {
      * @param kafkaAdmin      an instance of {@link KafkaAdmin}
      * @param jdbcTemplate    an instance of {@link JdbcTemplate}
      * @param consumerFactory an instance of {@link ConsumerFactory}
+     * @param meterRegistry   an instance of {@link MeterRegistry}
      * @param environment     an instance of {@link Environment}
      * @param pollInterval    configuration property defining polling interval
+     * @param autostart       configuration property defining whether to autostart
+     *                        replication
      */
     @Autowired
     void init(
             KafkaAdmin kafkaAdmin,
             JdbcTemplate jdbcTemplate,
             ConsumerFactory<String, byte[]> consumerFactory,
+            MeterRegistry meterRegistry,
             Environment environment,
             @Value("${event.replicator.poll.interval.ms:1000}") int pollInterval,
             @Value("${event.replicator.autostart:true}") boolean autostart) {
@@ -152,6 +158,7 @@ class EventReplicator {
                     new EventReplicatorWorker(
                             jdbcTemplate,
                             kafkaTemplate,
+                            meterRegistry,
                             environment,
                             eventSchema,
                             lastId.getKey(),

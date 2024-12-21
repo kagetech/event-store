@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023, Dariusz Szpakowski
+ * Copyright (c) 2023-2024, Dariusz Szpakowski
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -46,6 +46,8 @@ module tech.kage.event.replicator {
     requires transitive spring.kafka;
     requires spring.messaging;
     requires kafka.clients;
+
+    requires micrometer.core;
 
     exports tech.kage.event.replicator to spring.beans, spring.context;
     exports tech.kage.event.replicator.entity to spring.beans, spring.context;

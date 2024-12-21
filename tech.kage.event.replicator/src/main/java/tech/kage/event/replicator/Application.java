@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023, Dariusz Szpakowski
+ * Copyright (c) 2023-2024, Dariusz Szpakowski
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -25,9 +25,8 @@
 
 package tech.kage.event.replicator;
 
-import org.springframework.boot.WebApplicationType;
+import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
@@ -44,8 +43,6 @@ public class Application {
      * @param args command line arguments
      */
     public static void main(String[] args) {
-        new SpringApplicationBuilder(Application.class)
-                .web(WebApplicationType.NONE)
-                .run(args);
+        SpringApplication.run(Application.class, args);
     }
 }
