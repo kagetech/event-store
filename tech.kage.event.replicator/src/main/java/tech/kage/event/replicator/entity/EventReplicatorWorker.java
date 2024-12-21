@@ -37,6 +37,9 @@ import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.core.KafkaTemplate;
 
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
+
 /**
  * Worker component responsible for replicating events from a single event table
  * to a single Kafka topic.
@@ -56,6 +59,11 @@ class EventReplicatorWorker implements Runnable {
             """;
 
     /**
+     * SQL query used for selecting the id of the last event.
+     */
+    private static final String SELECT_LAST_EVENT_ID_SQL = "SELECT last_value FROM %s.%s_id_seq";
+
+    /**
      * Kafka record header storing the id of an event in the source database.
      */
     private static final String RECORD_HEADER_ID = "id";
@@ -65,6 +73,21 @@ class EventReplicatorWorker implements Runnable {
      * one batch.
      */
     private static final String MAX_ROWS_PROPERTY = "event.replicator.poll.max.rows";
+
+    /**
+     * The name of Micrometer event replication lag gauge.
+     */
+    private static final String MICROMETER_LAG_GAUGE_NAME = "event.replicator.lag";
+
+    /**
+     * The description of Micrometer event replication lag gauge.
+     */
+    private static final String MICROMETER_LAG_GAUGE_DESC = "The difference between the latest event in the source topic and the latest replicated event";
+
+    /**
+     * The name of Micrometer topic tag.
+     */
+    private static final String MICROMETER_TAG_TOPIC = "topic";
 
     private final JdbcTemplate jdbcTemplate;
     private final KafkaTemplate<String, byte[]> kafkaTemplate;
@@ -80,6 +103,7 @@ class EventReplicatorWorker implements Runnable {
      *
      * @param jdbcTemplate    an instance of {@link JdbcTemplate}
      * @param kafkaTemplate   an instance of {@link KafkaTemplate}
+     * @param meterRegistry   an instance of {@link MeterRegistry}
      * @param environment     an instance of {@link Environment}
      * @param eventSchema     the name of the event schema
      * @param replicatedTopic the name of the replicated topic
@@ -89,6 +113,7 @@ class EventReplicatorWorker implements Runnable {
     EventReplicatorWorker(
             JdbcTemplate jdbcTemplate,
             KafkaTemplate<String, byte[]> kafkaTemplate,
+            MeterRegistry meterRegistry,
             Environment environment,
             String eventSchema,
             String replicatedTopic,
@@ -101,6 +126,12 @@ class EventReplicatorWorker implements Runnable {
         this.maxRows = environment.getProperty(MAX_ROWS_PROPERTY, Integer.class, 100);
 
         this.lastId = lastId;
+
+        Gauge
+                .builder(MICROMETER_LAG_GAUGE_NAME, this, worker -> worker.computeLag())
+                .description(MICROMETER_LAG_GAUGE_DESC)
+                .tags(MICROMETER_TAG_TOPIC, replicatedTopic)
+                .register(meterRegistry);
     }
 
     /**
@@ -168,5 +199,19 @@ class EventReplicatorWorker implements Runnable {
                 .allocate(Long.BYTES)
                 .putLong(val)
                 .array();
+    }
+
+    /**
+     * Computes the event replication lag, i.e. the difference between the latest
+     * event in the source topic and the latest replicated event.
+     * 
+     * @return computed replication lag
+     */
+    private double computeLag() {
+        var lastSourceId = jdbcTemplate.queryForObject(
+                SELECT_LAST_EVENT_ID_SQL.formatted(eventSchema, replicatedTopic),
+                Long.class);
+
+        return lastSourceId - lastId;
     }
 }

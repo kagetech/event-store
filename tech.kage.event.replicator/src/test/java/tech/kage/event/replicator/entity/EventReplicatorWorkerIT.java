@@ -65,6 +65,8 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import io.micrometer.core.instrument.MeterRegistry;
+
 /**
  * Integration tests for {@link EventReplicatorWorker}.
  * 
@@ -82,6 +84,9 @@ class EventReplicatorWorkerIT {
 
     @Autowired
     ConsumerFactory<String, byte[]> consumerFactory;
+
+    @Autowired
+    MeterRegistry meterRegistry;
 
     @Autowired
     Environment environment;
@@ -139,7 +144,8 @@ class EventReplicatorWorkerIT {
         // Given
         var lastId = 0;
 
-        var worker = new EventReplicatorWorker(jdbcTemplate, kafkaTemplate, environment, eventSchema, topic, lastId);
+        var worker = new EventReplicatorWorker(
+                jdbcTemplate, kafkaTemplate, meterRegistry, environment, eventSchema, topic, lastId);
 
         var sourceEvents = IntStream
                 .rangeClosed(1, maxPollRows - 1)
@@ -183,7 +189,8 @@ class EventReplicatorWorkerIT {
         // Given
         var lastId = 0;
 
-        var worker = new EventReplicatorWorker(jdbcTemplate, kafkaTemplate, environment, eventSchema, topic, lastId);
+        var worker = new EventReplicatorWorker(
+                jdbcTemplate, kafkaTemplate, meterRegistry, environment, eventSchema, topic, lastId);
 
         var sourceEvents = IntStream
                 .rangeClosed(1, maxPollRows + 1)
@@ -227,7 +234,8 @@ class EventReplicatorWorkerIT {
         // Given
         var lastId = 5;
 
-        var worker = new EventReplicatorWorker(jdbcTemplate, kafkaTemplate, environment, eventSchema, topic, lastId);
+        var worker = new EventReplicatorWorker(
+                jdbcTemplate, kafkaTemplate, meterRegistry, environment, eventSchema, topic, lastId);
 
         var sourceEvents = IntStream
                 .rangeClosed(1, 11)
@@ -274,7 +282,8 @@ class EventReplicatorWorkerIT {
         var lastId = 8;
         var expectedLastId = 23;
 
-        var worker = new EventReplicatorWorker(jdbcTemplate, kafkaTemplate, environment, eventSchema, topic, lastId);
+        var worker = new EventReplicatorWorker(
+                jdbcTemplate, kafkaTemplate, meterRegistry, environment, eventSchema, topic, lastId);
 
         var sourceEvents = IntStream
                 .rangeClosed(1, expectedLastId)
@@ -305,11 +314,39 @@ class EventReplicatorWorkerIT {
                 .isEqualTo(expectedLastId);
     }
 
+    @Test
+    void monitorsReplicationLag() {
+        // Given
+        var lastId = 5;
+        var lastSourceId = 13;
+        var expectedReplicationLag = 8;
+
+        var sourceEvents = IntStream
+                .rangeClosed(1, lastSourceId)
+                .boxed()
+                .map(id -> new EventData(id, UUID.randomUUID(), ("test payload " + id).getBytes(), Instant.now()))
+                .toList();
+
+        for (var event : sourceEvents) {
+            insertEvent(topic, event);
+        }
+
+        // When
+        new EventReplicatorWorker(jdbcTemplate, kafkaTemplate, meterRegistry, environment, eventSchema, topic, lastId);
+
+        // Then
+        var replicationLag = meterRegistry.find("event.replicator.lag").gauge().value();
+
+        assertThat(replicationLag)
+                .describedAs("replication lag")
+                .isEqualTo(expectedReplicationLag);
+    }
+
     private void insertEvent(String topic, EventData event) {
         jdbcTemplate
                 .update(
-                        "INSERT INTO events." + topic + " (id, key, data, timestamp) VALUES (?, ?, ?, ?)",
-                        event.id(), event.key(), event.data(), event.timestamp().atOffset(ZoneOffset.UTC));
+                        "INSERT INTO events." + topic + " (key, data, timestamp) VALUES (?, ?, ?)",
+                        event.key(), event.data(), event.timestamp().atOffset(ZoneOffset.UTC));
     }
 
     private ConsumerRecords<String, byte[]> readRecordsFromKafka(String topic) {
