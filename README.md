@@ -27,13 +27,13 @@ CREATE TABLE IF NOT EXISTS events.test_events (
 <dependency>
     <groupId>tech.kage.event</groupId>
     <artifactId>tech.kage.event</artifactId>
-    <version>1.1.1</version>
+    <version>1.2.0</version>
 </dependency>
 
 <dependency>
     <groupId>tech.kage.event</groupId>
     <artifactId>tech.kage.event.postgres</artifactId>
-    <version>1.1.1</version>
+    <version>1.2.0</version>
 </dependency>
 ```
 
