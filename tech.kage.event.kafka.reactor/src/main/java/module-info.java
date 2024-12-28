@@ -45,6 +45,11 @@ module tech.kage.event.kafka.reactor {
     requires spring.r2dbc;
     requires r2dbc.spi;
 
+    // Monitoring
+    requires jakarta.annotation;
+    requires micrometer.core;
+    requires spring.kafka;
+
     exports tech.kage.event.kafka.reactor;
 
     opens tech.kage.event.kafka.reactor to spring.core, org.apache.avro;
