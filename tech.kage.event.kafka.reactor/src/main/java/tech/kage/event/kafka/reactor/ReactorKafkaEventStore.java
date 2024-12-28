@@ -27,26 +27,41 @@ package tech.kage.event.kafka.reactor;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 
 import org.apache.avro.specific.SpecificRecord;
+import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.ListOffsetsOptions;
+import org.apache.kafka.clients.admin.OffsetSpec;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.common.IsolationLevel;
+import org.apache.kafka.common.TopicPartition;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.kafka.core.KafkaAdmin;
 import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.stereotype.Component;
 
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
+import jakarta.annotation.PreDestroy;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.kafka.receiver.KafkaReceiver;
+import reactor.kafka.receiver.MicrometerConsumerListener;
 import reactor.kafka.receiver.ReceiverOptions;
 import reactor.kafka.receiver.ReceiverPartition;
 import reactor.kafka.receiver.ReceiverRecord;
@@ -103,9 +118,24 @@ public class ReactorKafkaEventStore implements EventStore {
     private static final String METADATA_OFFSET = "offset";
     private static final String METADATA_HEADER_PREFIX = "header.";
 
+    private static final String MICROMETER_LAG_GAUGE_NAME = "event.store.consumer.lag";
+    private static final String MICROMETER_LAG_GAUGE_DESC = "The difference between the latest event in the source topic partition and the latest processed event from that topic partition";
+
+    private static final String MICROMETER_TAG_TOPIC = "topic";
+    private static final String MICROMETER_TAG_PARTITION = "partition";
+    private static final String MICROMETER_TAG_GROUP_ID = "group.id";
+    private static final String MICROMETER_TAG_CLIENT_ID = "client.id";
+
     private final KafkaSender<UUID, SpecificRecord> kafkaSender;
     private final ReceiverOptions<UUID, SpecificRecord> kafkaReceiverOptions;
     private final DatabaseClient databaseClient;
+    private final Optional<MeterRegistry> meterRegistry;
+
+    /**
+     * Kafka admin client used for retrieving partition's latest offset. Used only
+     * if {@code meterRegistry} is available.
+     */
+    private AdminClient adminClient;
 
     /**
      * Configuration property defining the name of the database schema with event
@@ -115,19 +145,50 @@ public class ReactorKafkaEventStore implements EventStore {
     private String eventSchema;
 
     /**
+     * Map of latest processed partition offsets used for monitoring consumer lag.
+     */
+    private Map<TopicPartition, Long> lastOffsets = new ConcurrentHashMap<>();
+
+    /**
      * Constructs a new {@link ReactorKafkaEventStore} instance.
      *
      * @param kafkaSender          an instance of {@link KafkaSender}
      * @param kafkaReceiverOptions an instance of {@link ReceiverOptions}
      * @param databaseClient       an instance of {@link DatabaseClient}
+     * @param meterRegistry        optional instance of {@link MeterRegistry}
      */
     ReactorKafkaEventStore(
             KafkaSender<UUID, SpecificRecord> kafkaSender,
             ReceiverOptions<UUID, SpecificRecord> kafkaReceiverOptions,
-            DatabaseClient databaseClient) {
+            DatabaseClient databaseClient,
+            Optional<MeterRegistry> meterRegistry) {
         this.kafkaSender = kafkaSender;
         this.kafkaReceiverOptions = kafkaReceiverOptions;
         this.databaseClient = databaseClient;
+        this.meterRegistry = meterRegistry;
+    }
+
+    /**
+     * Opens an admin client connection to Kafka if {@code meterRegistry} is
+     * available.
+     *
+     * @param kafkaAdmin an instance of {@link KafkaAdmin}
+     */
+    @Autowired
+    void init(KafkaAdmin kafkaAdmin) {
+        if (meterRegistry.isPresent()) {
+            adminClient = AdminClient.create(kafkaAdmin.getConfigurationProperties());
+        }
+    }
+
+    /**
+     * Close Kafka admin client if it was open.
+     */
+    @PreDestroy
+    void destroy() {
+        if (adminClient != null) {
+            adminClient.close();
+        }
     }
 
     @Override
@@ -170,47 +231,93 @@ public class ReactorKafkaEventStore implements EventStore {
         return KafkaReceiver
                 .create(
                         kafkaReceiverOptions
-                                .consumerProperty(ConsumerConfig.CLIENT_ID_CONFIG, "consumer-" + topic)
+                                .consumerProperty(ConsumerConfig.CLIENT_ID_CONFIG, clientId(topic))
                                 .commitInterval(Duration.ZERO)
                                 .commitBatchSize(0)
-                                .addAssignListener(partitions -> partitions.forEach(p -> p.seek(getLastOffset(p) + 1)))
+                                .addAssignListener(partitions -> handlePartitionsAssignment(topic, partitions))
                                 .subscription(List.of(topic)))
                 .receive()
                 .map(this::consume);
     }
 
     /**
+     * Handles partition assignment by seeking the last processed offset and
+     * configuring Micrometer consumer lag metric.
+     * 
+     * @param topic              topic which owns the assigned partitions
+     * @param receiverPartitions list of assigned partitions
+     */
+    private void handlePartitionsAssignment(String topic, Collection<ReceiverPartition> receiverPartitions) {
+        if (meterRegistry.isPresent()) {
+            var outdatedGauges = meterRegistry
+                    .get()
+                    .find(MICROMETER_LAG_GAUGE_NAME)
+                    .tag(MICROMETER_TAG_TOPIC, topic)
+                    .gauges();
+
+            for (var gauge : outdatedGauges) {
+                meterRegistry.get().remove(gauge.getId());
+            }
+        }
+
+        lastOffsets.entrySet().removeIf(entry -> entry.getKey().topic().equals(topic));
+
+        for (var receiverPartition : receiverPartitions) {
+            var topicPartition = receiverPartition.topicPartition();
+            var partition = topicPartition.partition();
+
+            var lastOffset = getLastOffset(topicPartition);
+
+            lastOffsets.put(topicPartition, lastOffset);
+
+            receiverPartition.seek(lastOffset + 1);
+
+            if (meterRegistry.isPresent()) {
+                Gauge
+                        .builder(MICROMETER_LAG_GAUGE_NAME, this, consumer -> consumer.computeLag(topicPartition))
+                        .description(MICROMETER_LAG_GAUGE_DESC)
+                        .tags(MICROMETER_TAG_TOPIC, topic)
+                        .tags(MICROMETER_TAG_PARTITION, Integer.toString(partition))
+                        .tags(MICROMETER_TAG_GROUP_ID, kafkaReceiverOptions.groupId())
+                        .tags(MICROMETER_TAG_CLIENT_ID, clientId(topic))
+                        .register(meterRegistry.get());
+            }
+        }
+    }
+
+    /**
      * Retrieves the last offset for a given Kafka topic partition.
      * 
-     * @param partition topic partition for which the last offset will be retrieved
+     * @param topicPartition topic partition for which the last offset will be
+     *                       retrieved
      * 
      * @return Kafka topic partition offset of the last processed event
      */
-    private long getLastOffset(ReceiverPartition partition) {
+    private long getLastOffset(TopicPartition topicPartition) {
         return databaseClient
                 .sql(SELECT_OFFSET_SQL.formatted(eventSchema))
-                .bind(TOPIC_COLUMN, partition.topicPartition().topic())
-                .bind(PARTITION_COLUMN, partition.topicPartition().partition())
+                .bind(TOPIC_COLUMN, topicPartition.topic())
+                .bind(PARTITION_COLUMN, topicPartition.partition())
                 .map(r -> (Long) r.get(OFFSET_COLUMN))
                 .one()
-                .switchIfEmpty(Mono.defer(() -> initializeOffsetInfo(partition)))
+                .switchIfEmpty(Mono.defer(() -> initializeOffsetInfo(topicPartition)))
                 .block();
     }
 
     /**
      * Initializes offset information for a given topic partition.
      * 
-     * @param partition topic partition for which the offset information is
-     *                  initialized
+     * @param topicPartition topic partition for which the offset information is
+     *                       initialized
      * 
      * @return -1 as the current value of the last offset for a given topic
      *         partition
      */
-    private Mono<Long> initializeOffsetInfo(ReceiverPartition partition) {
+    private Mono<Long> initializeOffsetInfo(TopicPartition topicPartition) {
         return databaseClient
                 .sql(INSERT_OFFSET_SQL.formatted(eventSchema))
-                .bind(TOPIC_COLUMN, partition.topicPartition().topic())
-                .bind(PARTITION_COLUMN, partition.topicPartition().partition())
+                .bind(TOPIC_COLUMN, topicPartition.topic())
+                .bind(PARTITION_COLUMN, topicPartition.partition())
                 .fetch()
                 .rowsUpdated()
                 .thenReturn(-1l);
@@ -232,7 +339,7 @@ public class ReactorKafkaEventStore implements EventStore {
      * 
      * @param event event whose offset is saved
      * 
-     * @return 1 if updated successfully, 0 otherwise
+     * @return passed event
      */
     private Mono<ReceiverRecord<UUID, SpecificRecord>> saveOffset(ReceiverRecord<UUID, SpecificRecord> event) {
         return databaseClient
@@ -242,7 +349,16 @@ public class ReactorKafkaEventStore implements EventStore {
                 .bind(OFFSET_COLUMN, event.offset())
                 .fetch()
                 .rowsUpdated()
+                .doOnNext(rowsUpdated -> updateLastOffset(event))
                 .thenReturn(event);
+    }
+
+    private void updateLastOffset(ReceiverRecord<UUID, SpecificRecord> event) {
+        lastOffsets.put(new TopicPartition(event.topic(), event.partition()), event.offset());
+    }
+
+    private String clientId(String topic) {
+        return "consumer-" + topic;
     }
 
     static Event<SpecificRecord> transform(ReceiverRecord<UUID, SpecificRecord> event) {
@@ -264,6 +380,39 @@ public class ReactorKafkaEventStore implements EventStore {
         }
 
         return Collections.unmodifiableMap(metadataMap);
+    }
+
+    /**
+     * Computes the consumer lag, i.e. the difference between the latest event in
+     * the source topic partition and the latest processed event from that topic
+     * partition.
+     * 
+     * @param topicPartition topic partition for which the consumer lag will be
+     *                       computed
+     * 
+     * @return computed consumer lag
+     */
+    private double computeLag(TopicPartition topicPartition) {
+        try {
+            var topicLatestOffset = adminClient
+                    .listOffsets(
+                            Map.of(topicPartition, OffsetSpec.latest()),
+                            new ListOffsetsOptions(IsolationLevel.READ_COMMITTED))
+                    .partitionResult(topicPartition)
+                    .get()
+                    .offset();
+
+            // subtract 2 (one for commit record and one because the latest offset indicates
+            // the next offset)
+
+            return topicLatestOffset - lastOffsets.get(topicPartition) - 2;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+
+            throw new IllegalStateException("Unable to compute consumer lag for " + topicPartition, e);
+        } catch (ExecutionException e) {
+            throw new IllegalStateException("Unable to compute consumer lag for " + topicPartition, e);
+        }
     }
 
     @Configuration
@@ -296,7 +445,9 @@ public class ReactorKafkaEventStore implements EventStore {
         }
 
         @Bean
-        ReceiverOptions<UUID, SpecificRecord> kafkaReceiverOptions(KafkaProperties properties) {
+        ReceiverOptions<UUID, SpecificRecord> kafkaReceiverOptions(
+                KafkaProperties properties,
+                Optional<MeterRegistry> meterRegistry) {
             var props = properties.buildConsumerProperties(null);
 
             props.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_committed");
@@ -307,7 +458,12 @@ public class ReactorKafkaEventStore implements EventStore {
             props.putIfAbsent(SPECIFIC_AVRO_READER_CONFIG, "true");
             props.putIfAbsent(VALUE_SUBJECT_NAME_STRATEGY_CONFIG, VALUE_SUBJECT_NAME_STRATEGY);
 
-            return ReceiverOptions.create(props);
+            return ReceiverOptions
+                    .<UUID, SpecificRecord>create(props)
+                    .consumerListener(
+                            meterRegistry.isPresent()
+                                    ? new MicrometerConsumerListener(meterRegistry.get())
+                                    : null);
         }
     }
 }

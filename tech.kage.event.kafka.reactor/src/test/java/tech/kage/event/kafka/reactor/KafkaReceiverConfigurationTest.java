@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023, Dariusz Szpakowski
+ * Copyright (c) 2023-2024, Dariusz Szpakowski
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -28,11 +28,15 @@ package tech.kage.event.kafka.reactor;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.Map;
+import java.util.Optional;
 
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
+
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import reactor.kafka.receiver.MicrometerConsumerListener;
 
 /**
  * Tests of Kafka receiver configuration.
@@ -57,7 +61,7 @@ class KafkaReceiverConfigurationTest {
         var expectedValueSubjectNameStrategy = "io.confluent.kafka.serializers.subject.RecordNameStrategy";
 
         // When
-        var receiverOptions = config.kafkaReceiverOptions(kafkaProperties);
+        var receiverOptions = config.kafkaReceiverOptions(kafkaProperties, Optional.empty());
 
         // Then
         var consumerProperties = receiverOptions.consumerProperties();
@@ -89,6 +93,26 @@ class KafkaReceiverConfigurationTest {
         assertThat(consumerProperties.get("value.subject.name.strategy"))
                 .describedAs("value subject name strategy")
                 .isEqualTo(expectedValueSubjectNameStrategy);
+
+        assertThat(receiverOptions.consumerListener())
+                .describedAs("consumer listener")
+                .isNull();
+    }
+
+    @Test
+    void configuresMicrometerMetricsIfMeterRegistryIsAvailable() {
+        // Given
+        var kafkaProperties = new KafkaProperties();
+
+        // When
+        var receiverOptions = config.kafkaReceiverOptions(kafkaProperties, Optional.of(new SimpleMeterRegistry()));
+
+        // Then
+        var consumerListener = receiverOptions.consumerListener();
+
+        assertThat(consumerListener)
+                .describedAs("consumer listener")
+                .isInstanceOf(MicrometerConsumerListener.class);
     }
 
     @Test
@@ -128,7 +152,7 @@ class KafkaReceiverConfigurationTest {
         var expectedValueSubjectNameStrategy = valueSubjectNameStrategy;
 
         // When
-        var receiverOptions = config.kafkaReceiverOptions(kafkaProperties);
+        var receiverOptions = config.kafkaReceiverOptions(kafkaProperties, Optional.empty());
 
         // Then
         var consumerProperties = receiverOptions.consumerProperties();
