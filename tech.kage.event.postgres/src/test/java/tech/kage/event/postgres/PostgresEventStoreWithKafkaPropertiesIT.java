@@ -66,7 +66,7 @@ class PostgresEventStoreWithKafkaPropertiesIT extends AbstractPostgresEventStore
     @SuppressWarnings("resource")
     @Container
     static final GenericContainer<?> schemaRegistry = new GenericContainer<>(
-            DockerImageName.parse("confluentinc/cp-schema-registry:7.6.1"))
+            DockerImageName.parse("confluentinc/cp-schema-registry:7.8.0"))
             .dependsOn(kafka)
             .withNetwork(network)
             .withExposedPorts(8081)
