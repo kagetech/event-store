@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023, Dariusz Szpakowski
+ * Copyright (c) 2023-2025, Dariusz Szpakowski
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -29,12 +29,12 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.Network;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.utility.DockerImageName;
 
 /**
@@ -52,9 +52,7 @@ class PostgresEventStoreIT extends AbstractPostgresEventStoreIT {
 
     @SuppressWarnings("resource")
     @Container
-    static final KafkaContainer kafka = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.6.1"))
-            .withNetwork(network)
-            .withKraft();
+    static final KafkaContainer kafka = new KafkaContainer("apache/kafka-native:3.8.1").withNetwork(network);
 
     @SuppressWarnings("resource")
     @Container

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023, Dariusz Szpakowski
+ * Copyright (c) 2023-2025, Dariusz Szpakowski
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -52,11 +52,11 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.Network;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.utility.DockerImageName;
 
 import reactor.core.publisher.Flux;
@@ -91,9 +91,7 @@ class KafkaStreamsEventStoreIT {
 
     @SuppressWarnings("resource")
     @Container
-    static final KafkaContainer kafka = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.6.1"))
-            .withNetwork(network)
-            .withKraft();
+    static final KafkaContainer kafka = new KafkaContainer("apache/kafka-native:3.8.1").withNetwork(network);
 
     @SuppressWarnings("resource")
     @Container
@@ -110,7 +108,7 @@ class KafkaStreamsEventStoreIT {
 
     @DynamicPropertySource
     static void overrideProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.kafka.bootstrap-servers", () -> kafka.getBootstrapServers());
+        registry.add("spring.kafka.bootstrap-servers", kafka::getBootstrapServers);
 
         registry.add(
                 "spring.kafka.properties.schema.registry.url",

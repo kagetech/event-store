@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023-2024, Dariusz Szpakowski
+ * Copyright (c) 2023-2025, Dariusz Szpakowski
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -49,6 +49,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
 import org.springframework.core.io.Resource;
@@ -59,11 +60,10 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.util.FileCopyUtils;
-import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
+import org.testcontainers.kafka.KafkaContainer;
 
 import io.micrometer.core.instrument.MeterRegistry;
 
@@ -102,10 +102,9 @@ class EventReplicatorWorkerIT {
     @Container
     static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:15-alpine");
 
-    @SuppressWarnings("resource")
     @Container
-    static final KafkaContainer kafka = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.6.1"))
-            .withKraft();
+    @ServiceConnection
+    static final KafkaContainer kafka = new KafkaContainer("apache/kafka-native:3.8.1");
 
     @DynamicPropertySource
     static void overrideProperties(DynamicPropertyRegistry registry) {
@@ -115,8 +114,6 @@ class EventReplicatorWorkerIT {
                         postgres.getDatabaseName()));
         registry.add("spring.datasource.username", () -> postgres.getUsername());
         registry.add("spring.datasource.password", () -> postgres.getPassword());
-
-        registry.add("spring.kafka.bootstrap-servers", () -> kafka.getBootstrapServers());
     }
 
     @Configuration
