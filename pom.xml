@@ -65,7 +65,7 @@
         <gpg.plugin.version>3.2.7</gpg.plugin.version>
 
         <!-- Maven Central Publishing Plugin -->
-        <central.publishing.plugin.version>0.5.0</central.publishing.plugin.version>
+        <central.publishing.plugin.version>0.7.0</central.publishing.plugin.version>
 
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
