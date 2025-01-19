@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023, Dariusz Szpakowski
+ * Copyright (c) 2023-2025, Dariusz Szpakowski
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -43,6 +43,10 @@ public interface EventStore {
      * @param event event to be saved
      *
      * @return saved event
+     * 
+     * @throws NullPointerException if the specified topic or event is null
+     * @throws ClassCastException   if the specified event contains metadata of type
+     *                              different from {@code byte[]}
      */
     <T extends SpecificRecord> Mono<Event<T>> save(String topic, Event<T> event);
 }

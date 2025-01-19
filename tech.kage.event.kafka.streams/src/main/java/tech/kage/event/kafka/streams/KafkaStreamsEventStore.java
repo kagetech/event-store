@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023-2024, Dariusz Szpakowski
+ * Copyright (c) 2023-2025, Dariusz Szpakowski
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -37,6 +37,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.apache.avro.specific.SpecificRecord;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.header.Header;
+import org.apache.kafka.common.header.internals.RecordHeader;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.StreamsConfig;
@@ -119,7 +121,13 @@ public class KafkaStreamsEventStore implements EventStore {
                                         null,
                                         event.timestamp().toEpochMilli(),
                                         event.key(),
-                                        event.payload())))
+                                        event.payload(),
+                                        event.metadata()
+                                                .entrySet()
+                                                .stream()
+                                                .map(e -> new RecordHeader(e.getKey(), (byte[]) e.getValue()))
+                                                .map(Header.class::cast)
+                                                .toList())))
                 .then(Mono.just(event));
     }
 

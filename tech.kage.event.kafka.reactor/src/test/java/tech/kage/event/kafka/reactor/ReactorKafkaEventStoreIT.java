@@ -29,7 +29,10 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.IntStream;
@@ -150,12 +153,9 @@ class ReactorKafkaEventStoreIT {
     @Test
     void savesEventsInKafka() {
         // Given
-        var events = IntStream
-                .rangeClosed(1, 10)
-                .boxed()
-                .map(id -> TestPayload.newBuilder().setText("test payload " + id).build())
-                .map(payload -> Event.from(UUID.randomUUID(), payload))
-                .toList();
+        var events = testEvents(10);
+
+        var expectedEventsIterator = events.iterator();
 
         // When
         var savedEvents = Flux.concat(events.stream().map(event -> eventStore.save(topic, event)).toList());
@@ -167,7 +167,14 @@ class ReactorKafkaEventStoreIT {
 
         StepVerifier
                 .create(savedEvents.thenMany(retrievedEvents))
-                .expectNextSequence(events)
+                .thenConsumeWhile(nextEvent -> {
+                    var expectedEvent = expectedEventsIterator.next();
+
+                    return nextEvent.key().equals(expectedEvent.key())
+                            && nextEvent.payload().equals(expectedEvent.payload())
+                            && nextEvent.timestamp().equals(expectedEvent.timestamp())
+                            && isEqual(nextEvent.metadata(), expectedEvent.metadata());
+                })
                 .as("retrieves stored events with the same data")
                 .verifyComplete();
     }
@@ -175,9 +182,7 @@ class ReactorKafkaEventStoreIT {
     @Test
     void returnsStoredEvent() {
         // Given
-        var key = UUID.randomUUID();
-        var payload = TestPayload.newBuilder().setText("test payload").build();
-        var event = Event.from(key, payload);
+        var event = testEvent(123);
 
         // When
         var storedEvent = eventStore.save(topic, event);
@@ -193,12 +198,7 @@ class ReactorKafkaEventStoreIT {
     @Test
     void readsEventsFromKafka() {
         // Given
-        var events = IntStream
-                .rangeClosed(1, 10)
-                .boxed()
-                .map(id -> TestPayload.newBuilder().setText("test payload " + id).build())
-                .map((SpecificRecord payload) -> Event.from(UUID.randomUUID(), payload))
-                .toList();
+        var events = testEvents(10);
 
         var savedEvents = Flux.concat(events.stream().map(event -> eventStore.save(topic, event)).toList());
 
@@ -207,11 +207,21 @@ class ReactorKafkaEventStoreIT {
                 .boxed()
                 .map(i -> {
                     var event = events.get(i);
-                    var metadata = Map.<String, Object>of("partition", 0, "offset", Long.valueOf(i));
+
+                    var metadata = new HashMap<String, Object>();
+
+                    metadata.put("partition", 0);
+                    metadata.put("offset", Long.valueOf(i));
+
+                    for (var metadataEntry : event.metadata().entrySet()) {
+                        metadata.put("header." + metadataEntry.getKey(), metadataEntry.getValue());
+                    }
 
                     return Event.from(event.key(), event.payload(), event.timestamp(), metadata);
                 })
                 .toList();
+
+        var expectedEventsIterator = expectedEvents.iterator();
 
         // When
         var retrievedEvents = eventStore
@@ -223,7 +233,14 @@ class ReactorKafkaEventStoreIT {
         // Then
         StepVerifier
                 .create(savedEvents.thenMany(retrievedEvents))
-                .expectNextSequence(expectedEvents)
+                .thenConsumeWhile(nextEvent -> {
+                    var expectedEvent = expectedEventsIterator.next();
+
+                    return nextEvent.key().equals(expectedEvent.key())
+                            && nextEvent.payload().equals(expectedEvent.payload())
+                            && nextEvent.timestamp().equals(expectedEvent.timestamp())
+                            && isEqual(nextEvent.metadata(), expectedEvent.metadata());
+                })
                 .as("retrieves stored events with the same data")
                 .verifyComplete();
     }
@@ -231,12 +248,7 @@ class ReactorKafkaEventStoreIT {
     @Test
     void resumesProcessingEventsFromStoredOffset() {
         // Given
-        var events = IntStream
-                .rangeClosed(1, 10)
-                .boxed()
-                .map(id -> TestPayload.newBuilder().setText("test payload " + id).build())
-                .map((SpecificRecord payload) -> Event.from(UUID.randomUUID(), payload))
-                .toList();
+        var events = testEvents(10);
 
         // save 10 events
         var savedEvents = Flux.concat(events.stream().map(event -> eventStore.save(topic, event)).toList());
@@ -252,11 +264,21 @@ class ReactorKafkaEventStoreIT {
                 .boxed()
                 .map(i -> {
                     var event = events.get(i);
-                    var metadata = Map.<String, Object>of("partition", 0, "offset", Long.valueOf(i));
+
+                    var metadata = new HashMap<String, Object>();
+
+                    metadata.put("partition", 0);
+                    metadata.put("offset", Long.valueOf(i));
+
+                    for (var metadataEntry : event.metadata().entrySet()) {
+                        metadata.put("header." + metadataEntry.getKey(), metadataEntry.getValue());
+                    }
 
                     return Event.from(event.key(), event.payload(), event.timestamp(), metadata);
                 })
                 .toList();
+
+        var expectedEventsIterator = expectedEvents.iterator();
 
         // When
         var secondBatch = eventStore
@@ -268,7 +290,14 @@ class ReactorKafkaEventStoreIT {
         // Then
         StepVerifier
                 .create(savedEvents.thenMany(firstBatch).thenMany(secondBatch))
-                .expectNextSequence(expectedEvents)
+                .thenConsumeWhile(nextEvent -> {
+                    var expectedEvent = expectedEventsIterator.next();
+
+                    return nextEvent.key().equals(expectedEvent.key())
+                            && nextEvent.payload().equals(expectedEvent.payload())
+                            && nextEvent.timestamp().equals(expectedEvent.timestamp())
+                            && isEqual(nextEvent.metadata(), expectedEvent.metadata());
+                })
                 .as("resumes processing events")
                 .verifyComplete();
     }
@@ -281,6 +310,51 @@ class ReactorKafkaEventStoreIT {
     }
 
     private Event<?> toEvent(ReceiverRecord<UUID, SpecificRecord> rec) {
-        return Event.from(rec.key(), rec.value(), Instant.ofEpochMilli(rec.timestamp()));
+        var metadata = new HashMap<String, Object>();
+
+        for (var header : rec.headers()) {
+            metadata.put(header.key(), header.value());
+        }
+
+        return Event.from(rec.key(), rec.value(), Instant.ofEpochMilli(rec.timestamp()), metadata);
+    }
+
+    private List<Event<SpecificRecord>> testEvents(int count) {
+        return IntStream
+                .rangeClosed(1, count)
+                .boxed()
+                .map(this::testEvent)
+                .toList();
+    }
+
+    private Event<SpecificRecord> testEvent(int offset) {
+        return Event.from(
+                UUID.randomUUID(),
+                TestPayload.newBuilder().setText("test payload " + offset).build(),
+                Instant.now(),
+                Map.of(
+                        "meta1", "meta1_value".getBytes(),
+                        "meta2", UUID.randomUUID().toString().getBytes(),
+                        "meta3", Long.toString(offset).getBytes()));
+    }
+
+    private boolean isEqual(Map<String, Object> actual, Map<String, Object> expected) {
+        if (actual.size() != expected.size()) {
+            return false;
+        }
+
+        return actual
+                .entrySet()
+                .stream()
+                .allMatch(e -> {
+                    var actualValue = e.getValue();
+                    var expectedValue = expected.get(e.getKey());
+
+                    if (actualValue instanceof byte[] actualBytes && expectedValue instanceof byte[] expectedBytes) {
+                        return Arrays.equals(actualBytes, expectedBytes);
+                    } else {
+                        return actualValue.equals(expectedValue);
+                    }
+                });
     }
 }

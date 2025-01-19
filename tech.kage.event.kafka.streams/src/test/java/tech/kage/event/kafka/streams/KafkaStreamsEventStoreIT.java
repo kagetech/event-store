@@ -27,7 +27,11 @@ package tech.kage.event.kafka.streams;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.IntStream;
 
@@ -157,12 +161,9 @@ class KafkaStreamsEventStoreIT {
     @Order(1)
     void savesEventsInKafka() {
         // Given
-        var events = IntStream
-                .rangeClosed(1, 10)
-                .boxed()
-                .map(id -> TestPayload.newBuilder().setText("test payload " + id).build())
-                .map(payload -> Event.from(UUID.randomUUID(), payload))
-                .toList();
+        var events = testEvents(10);
+
+        var expectedEventsIterator = events.iterator();
 
         // When
         var savedEvents = Flux.concat(events.stream().map(event -> eventStore.save(TEST_EVENTS, event)).toList());
@@ -174,7 +175,14 @@ class KafkaStreamsEventStoreIT {
 
         StepVerifier
                 .create(savedEvents.thenMany(retrievedEvents))
-                .expectNextSequence(events)
+                .thenConsumeWhile(nextEvent -> {
+                    var expectedEvent = expectedEventsIterator.next();
+
+                    return nextEvent.key().equals(expectedEvent.key())
+                            && nextEvent.payload().equals(expectedEvent.payload())
+                            && nextEvent.timestamp().equals(expectedEvent.timestamp())
+                            && isEqual(nextEvent.metadata(), expectedEvent.metadata());
+                })
                 .as("retrieves stored events with the same data")
                 .verifyComplete();
     }
@@ -183,9 +191,7 @@ class KafkaStreamsEventStoreIT {
     @Order(2)
     void returnsStoredEvent() {
         // Given
-        var key = UUID.randomUUID();
-        var payload = TestPayload.newBuilder().setText("test payload").build();
-        var event = Event.from(key, payload);
+        var event = testEvent(123);
 
         // When
         var storedEvent = eventStore.save(TEST_EVENTS, event);
@@ -202,14 +208,11 @@ class KafkaStreamsEventStoreIT {
     @Order(3)
     void subscribesToEventStream() {
         // Given
-        var events = IntStream
-                .rangeClosed(1, 10)
-                .boxed()
-                .map(id -> TestPayload.newBuilder().setText("test payload " + id).build())
-                .map((SpecificRecord payload) -> Event.from(UUID.randomUUID(), payload))
-                .toList();
+        var events = testEvents(10);
 
         var savedEvents = Flux.concat(events.stream().map(event -> eventStore.save(TEST_EVENTS_IN, event)).toList());
+
+        var expectedEventsIterator = events.iterator();
 
         // When
         // topology specified in the bean init method
@@ -221,7 +224,14 @@ class KafkaStreamsEventStoreIT {
 
         StepVerifier
                 .create(savedEvents.thenMany(retrievedEvents))
-                .expectNextSequence(events)
+                .thenConsumeWhile(nextEvent -> {
+                    var expectedEvent = expectedEventsIterator.next();
+
+                    return nextEvent.key().equals(expectedEvent.key())
+                            && nextEvent.payload().equals(expectedEvent.payload())
+                            && nextEvent.timestamp().equals(expectedEvent.timestamp())
+                            && isEqual(nextEvent.metadata(), expectedEvent.metadata());
+                })
                 .as("retrieves stored events with the same data")
                 .verifyComplete();
     }
@@ -234,6 +244,51 @@ class KafkaStreamsEventStoreIT {
     }
 
     private Event<?> toEvent(ReceiverRecord<UUID, SpecificRecord> rec) {
-        return Event.from(rec.key(), rec.value(), Instant.ofEpochMilli(rec.timestamp()));
+        var metadata = new HashMap<String, Object>();
+
+        for (var header : rec.headers()) {
+            metadata.put(header.key(), header.value());
+        }
+
+        return Event.from(rec.key(), rec.value(), Instant.ofEpochMilli(rec.timestamp()), metadata);
+    }
+
+    private List<Event<SpecificRecord>> testEvents(int count) {
+        return IntStream
+                .rangeClosed(1, count)
+                .boxed()
+                .map(this::testEvent)
+                .toList();
+    }
+
+    private Event<SpecificRecord> testEvent(int offset) {
+        return Event.from(
+                UUID.randomUUID(),
+                TestPayload.newBuilder().setText("test payload " + offset).build(),
+                Instant.now(),
+                Map.of(
+                        "meta1", "meta1_value".getBytes(),
+                        "meta2", UUID.randomUUID().toString().getBytes(),
+                        "meta3", Long.toString(offset).getBytes()));
+    }
+
+    private boolean isEqual(Map<String, Object> actual, Map<String, Object> expected) {
+        if (actual.size() != expected.size()) {
+            return false;
+        }
+
+        return actual
+                .entrySet()
+                .stream()
+                .allMatch(e -> {
+                    var actualValue = e.getValue();
+                    var expectedValue = expected.get(e.getKey());
+
+                    if (actualValue instanceof byte[] actualBytes && expectedValue instanceof byte[] expectedBytes) {
+                        return Arrays.equals(actualBytes, expectedBytes);
+                    } else {
+                        return actualValue.equals(expectedValue);
+                    }
+                });
     }
 }
