@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023-2024, Dariusz Szpakowski
+ * Copyright (c) 2023-2025, Dariusz Szpakowski
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -25,11 +25,21 @@
 
 package tech.kage.event.replicator.entity;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.sql.Timestamp;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Stream;
 
+import org.apache.avro.Schema;
+import org.apache.avro.SchemaBuilder;
+import org.apache.avro.generic.GenericDatumReader;
+import org.apache.avro.io.DatumReader;
+import org.apache.avro.io.DecoderFactory;
+import org.apache.avro.util.Utf8;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.header.internals.RecordHeader;
@@ -180,8 +190,9 @@ class EventReplicatorWorker implements Runnable {
 
                 var key = (UUID) event.get("key");
                 var data = (byte[]) event.get("data");
+                var metadata = (byte[]) event.get("metadata");
                 var timestamp = (Timestamp) event.get("timestamp");
-                var headers = List.<Header>of(new RecordHeader(RECORD_HEADER_ID, Long.toString(newLastId).getBytes()));
+                var headers = toHeaders(newLastId, metadata);
 
                 // send event to Kafka topic
                 kafka.send(new ProducerRecord<>(topic, null, timestamp.getTime(), key.toString(), data, headers));
@@ -192,6 +203,16 @@ class EventReplicatorWorker implements Runnable {
 
             return newLastId;
         });
+    }
+
+    private List<Header> toHeaders(Long id, byte[] metadata) {
+        return Stream
+                .concat(
+                        Stream.of(Map.entry(new Utf8(RECORD_HEADER_ID), ByteBuffer.wrap(Long.toString(id).getBytes()))),
+                        MetadataDeserializer.deserialize(metadata).entrySet().stream())
+                .map(e -> new RecordHeader(e.getKey().toString(), e.getValue().array()))
+                .map(Header.class::cast)
+                .toList();
     }
 
     private byte[] longToBytes(long val) {
@@ -213,5 +234,32 @@ class EventReplicatorWorker implements Runnable {
                 Long.class);
 
         return lastSourceId - lastId;
+    }
+
+    /**
+     * Deserializer of event metadata from an Avro map.
+     */
+    private static class MetadataDeserializer {
+        private static final Schema METADATA_SCHEMA = SchemaBuilder.map().values().bytesType();
+
+        private static final DecoderFactory decoderFactory = DecoderFactory.get();
+        private static final DatumReader<Map<Utf8, ByteBuffer>> reader = new GenericDatumReader<>(METADATA_SCHEMA);
+
+        /**
+         * Deserialize the given Avro map to event metadata.
+         * 
+         * @param metadata bytes representing the serialized Avro map with metadata
+         * 
+         * @return deserialized metadata map
+         */
+        private static Map<Utf8, ByteBuffer> deserialize(byte[] metadata) {
+            try {
+                var decoder = decoderFactory.binaryDecoder(metadata, null);
+
+                return reader.read(null, decoder);
+            } catch (IOException e) {
+                throw new UncheckedIOException("Unable to deserialize metadata: " + metadata, e);
+            }
+        }
     }
 }

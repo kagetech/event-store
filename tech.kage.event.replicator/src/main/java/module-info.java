@@ -46,6 +46,7 @@ module tech.kage.event.replicator {
     requires transitive spring.kafka;
     requires spring.messaging;
     requires kafka.clients;
+    requires org.apache.avro;
 
     requires micrometer.core;
 
