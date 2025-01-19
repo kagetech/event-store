@@ -28,6 +28,7 @@ package tech.kage.event.replicator.entity;
 import static org.assertj.core.api.Assertions.assertThat;
 import static tech.kage.event.replicator.entity.EventReplicator.PROGRESS_TOPIC;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.Reader;
@@ -38,11 +39,20 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.IntStream;
 
+import org.apache.avro.Schema;
+import org.apache.avro.SchemaBuilder;
+import org.apache.avro.generic.GenericDatumWriter;
+import org.apache.avro.io.DatumWriter;
+import org.apache.avro.io.EncoderFactory;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.header.Header;
+import org.apache.kafka.common.header.internals.RecordHeader;
+import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -57,8 +67,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.util.FileCopyUtils;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -99,22 +107,18 @@ class EventReplicatorWorkerIT {
 
     private String topic;
 
+    static final Schema METADATA_SCHEMA = SchemaBuilder.map().values().bytesType();
+
+    static final EncoderFactory encoderFactory = EncoderFactory.get();
+    static final DatumWriter<Map<String, ByteBuffer>> writer = new GenericDatumWriter<>(METADATA_SCHEMA);
+
     @Container
+    @ServiceConnection
     static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:15-alpine");
 
     @Container
     @ServiceConnection
     static final KafkaContainer kafka = new KafkaContainer("apache/kafka-native:3.8.1");
-
-    @DynamicPropertySource
-    static void overrideProperties(DynamicPropertyRegistry registry) {
-        registry.add(
-                "spring.datasource.url",
-                () -> "jdbc:postgresql://%s:%s/%s".formatted(postgres.getHost(), postgres.getFirstMappedPort(),
-                        postgres.getDatabaseName()));
-        registry.add("spring.datasource.username", () -> postgres.getUsername());
-        registry.add("spring.datasource.password", () -> postgres.getPassword());
-    }
 
     @Configuration
     @EnableAutoConfiguration
@@ -147,7 +151,7 @@ class EventReplicatorWorkerIT {
         var sourceEvents = IntStream
                 .rangeClosed(1, maxPollRows - 1)
                 .boxed()
-                .map(id -> new EventData(id, UUID.randomUUID(), ("test payload " + id).getBytes(), Instant.now()))
+                .map(this::testEvent)
                 .toList();
 
         for (var event : sourceEvents) {
@@ -175,9 +179,20 @@ class EventReplicatorWorkerIT {
                             .describedAs("replicated event timestamp")
                             .isEqualTo(sourceEvent.timestamp().toEpochMilli());
 
-                    assertThat(new String(replicatedEvent.headers().lastHeader("id").value()))
-                            .describedAs("replicated event id header")
-                            .isEqualTo(Long.toString(sourceEvent.id()));
+                    var expectedHeaders = new RecordHeaders(
+                            sourceEvent
+                                    .metadata()
+                                    .entrySet()
+                                    .stream()
+                                    .map(e -> new RecordHeader(e.getKey(), ((ByteBuffer) e.getValue()).array()))
+                                    .map(Header.class::cast)
+                                    .toList());
+
+                    expectedHeaders.add(new RecordHeader("id", Long.toString(sourceEvent.id()).getBytes()));
+
+                    assertThat(replicatedEvent.headers())
+                            .describedAs("replicated event headers")
+                            .hasSameElementsAs(expectedHeaders);
                 });
     }
 
@@ -192,7 +207,7 @@ class EventReplicatorWorkerIT {
         var sourceEvents = IntStream
                 .rangeClosed(1, maxPollRows + 1)
                 .boxed()
-                .map(id -> new EventData(id, UUID.randomUUID(), ("test payload " + id).getBytes(), Instant.now()))
+                .map(this::testEvent)
                 .toList();
 
         for (var event : sourceEvents) {
@@ -220,9 +235,20 @@ class EventReplicatorWorkerIT {
                             .describedAs("replicated event timestamp")
                             .isEqualTo(sourceEvent.timestamp().toEpochMilli());
 
-                    assertThat(new String(replicatedEvent.headers().lastHeader("id").value()))
-                            .describedAs("replicated event id header")
-                            .isEqualTo(Long.toString(sourceEvent.id()));
+                    var expectedHeaders = new RecordHeaders(
+                            sourceEvent
+                                    .metadata()
+                                    .entrySet()
+                                    .stream()
+                                    .map(e -> new RecordHeader(e.getKey(), ((ByteBuffer) e.getValue()).array()))
+                                    .map(Header.class::cast)
+                                    .toList());
+
+                    expectedHeaders.add(new RecordHeader("id", Long.toString(sourceEvent.id()).getBytes()));
+
+                    assertThat(replicatedEvent.headers())
+                            .describedAs("replicated event headers")
+                            .hasSameElementsAs(expectedHeaders);
                 });
     }
 
@@ -237,7 +263,7 @@ class EventReplicatorWorkerIT {
         var sourceEvents = IntStream
                 .rangeClosed(1, 11)
                 .boxed()
-                .map(id -> new EventData(id, UUID.randomUUID(), ("test payload " + id).getBytes(), Instant.now()))
+                .map(this::testEvent)
                 .toList();
 
         for (var event : sourceEvents) {
@@ -267,9 +293,20 @@ class EventReplicatorWorkerIT {
                             .describedAs("replicated event timestamp")
                             .isEqualTo(sourceEvent.timestamp().toEpochMilli());
 
-                    assertThat(new String(replicatedEvent.headers().lastHeader("id").value()))
-                            .describedAs("replicated event id header")
-                            .isEqualTo(Long.toString(sourceEvent.id()));
+                    var expectedHeaders = new RecordHeaders(
+                            sourceEvent
+                                    .metadata()
+                                    .entrySet()
+                                    .stream()
+                                    .map(e -> new RecordHeader(e.getKey(), ((ByteBuffer) e.getValue()).array()))
+                                    .map(Header.class::cast)
+                                    .toList());
+
+                    expectedHeaders.add(new RecordHeader("id", Long.toString(sourceEvent.id()).getBytes()));
+
+                    assertThat(replicatedEvent.headers())
+                            .describedAs("replicated event headers")
+                            .hasSameElementsAs(expectedHeaders);
                 });
     }
 
@@ -285,7 +322,7 @@ class EventReplicatorWorkerIT {
         var sourceEvents = IntStream
                 .rangeClosed(1, expectedLastId)
                 .boxed()
-                .map(id -> new EventData(id, UUID.randomUUID(), ("test payload " + id).getBytes(), Instant.now()))
+                .map(this::testEvent)
                 .toList();
 
         for (var event : sourceEvents) {
@@ -321,7 +358,7 @@ class EventReplicatorWorkerIT {
         var sourceEvents = IntStream
                 .rangeClosed(1, lastSourceId)
                 .boxed()
-                .map(id -> new EventData(id, UUID.randomUUID(), ("test payload " + id).getBytes(), Instant.now()))
+                .map(this::testEvent)
                 .toList();
 
         for (var event : sourceEvents) {
@@ -332,7 +369,7 @@ class EventReplicatorWorkerIT {
         new EventReplicatorWorker(jdbcTemplate, kafkaTemplate, meterRegistry, environment, eventSchema, topic, lastId);
 
         // Then
-        var replicationLag = meterRegistry.find("event.replicator.lag").gauge().value();
+        var replicationLag = meterRegistry.find("event.replicator.lag").tag("topic", topic).gauge().value();
 
         assertThat(replicationLag)
                 .describedAs("replication lag")
@@ -342,8 +379,11 @@ class EventReplicatorWorkerIT {
     private void insertEvent(String topic, EventData event) {
         jdbcTemplate
                 .update(
-                        "INSERT INTO events." + topic + " (key, data, timestamp) VALUES (?, ?, ?)",
-                        event.key(), event.data(), event.timestamp().atOffset(ZoneOffset.UTC));
+                        "INSERT INTO events." + topic + " (key, data, metadata, timestamp) VALUES (?, ?, ?, ?)",
+                        event.key(),
+                        event.data(),
+                        serializeMetadata(event.metadata()),
+                        event.timestamp().atOffset(ZoneOffset.UTC));
     }
 
     private ConsumerRecords<String, byte[]> readRecordsFromKafka(String topic) {
@@ -365,6 +405,30 @@ class EventReplicatorWorkerIT {
                 .getLong();
     }
 
-    private record EventData(long id, UUID key, byte[] data, Instant timestamp) {
+    private EventData testEvent(int id) {
+        return new EventData(
+                id,
+                UUID.randomUUID(),
+                ("test payload " + id).getBytes(),
+                Map.of(
+                        "meta1", ByteBuffer.wrap("meta1_value".getBytes()),
+                        "meta2", ByteBuffer.wrap(UUID.randomUUID().toString().getBytes()),
+                        "meta3", ByteBuffer.wrap(Long.toString(id).getBytes())),
+                Instant.now());
+    }
+
+    private byte[] serializeMetadata(Map<String, ByteBuffer> metadata) {
+        try (var out = new ByteArrayOutputStream()) {
+            var encoder = encoderFactory.directBinaryEncoder(out, null);
+
+            writer.write(metadata, encoder);
+
+            return out.toByteArray();
+        } catch (IOException e) {
+            throw new UncheckedIOException("Unable to serialize metadata: " + metadata, e);
+        }
+    }
+
+    private record EventData(long id, UUID key, byte[] data, Map<String, ByteBuffer> metadata, Instant timestamp) {
     }
 }
