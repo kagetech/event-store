@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023-2024, Dariusz Szpakowski
+ * Copyright (c) 2023-2025, Dariusz Szpakowski
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -44,8 +44,11 @@ import org.apache.kafka.clients.admin.ListOffsetsOptions;
 import org.apache.kafka.clients.admin.OffsetSpec;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.IsolationLevel;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.header.Header;
+import org.apache.kafka.common.header.internals.RecordHeader;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
@@ -199,11 +202,18 @@ public class ReactorKafkaEventStore implements EventStore {
         return kafkaSender
                 .send(Mono.just(
                         SenderRecord.create(
-                                topic,
-                                null,
-                                event.timestamp().toEpochMilli(),
-                                event.key(),
-                                event.payload(),
+                                new ProducerRecord<>(
+                                        topic,
+                                        null,
+                                        event.timestamp().toEpochMilli(),
+                                        event.key(),
+                                        event.payload(),
+                                        event.metadata()
+                                                .entrySet()
+                                                .stream()
+                                                .map(e -> new RecordHeader(e.getKey(), (byte[]) e.getValue()))
+                                                .map(Header.class::cast)
+                                                .toList()),
                                 null)))
                 .then(Mono.just(event));
     }

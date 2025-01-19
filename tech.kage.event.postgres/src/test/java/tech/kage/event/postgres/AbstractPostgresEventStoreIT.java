@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023, Dariusz Szpakowski
+ * Copyright (c) 2023-2025, Dariusz Szpakowski
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -25,17 +25,36 @@
 
 package tech.kage.event.postgres;
 
+import static java.util.stream.Collectors.toMap;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Named.named;
+import static org.junit.jupiter.params.provider.Arguments.arguments;
+
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Stream;
 
+import org.apache.avro.Schema;
+import org.apache.avro.SchemaBuilder;
+import org.apache.avro.generic.GenericDatumReader;
+import org.apache.avro.io.DatumReader;
+import org.apache.avro.io.DecoderFactory;
 import org.apache.avro.specific.SpecificRecord;
+import org.apache.avro.util.Utf8;
 import org.apache.kafka.common.serialization.Deserializer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
@@ -68,7 +87,12 @@ abstract class AbstractPostgresEventStoreIT {
     DatabaseClient databaseClient;
 
     @Autowired
-    Deserializer<Object> kafkaAvroDeserializer;
+    Deserializer<SpecificRecord> kafkaAvroDeserializer;
+
+    static final Schema METADATA_SCHEMA = SchemaBuilder.map().values().bytesType();
+
+    static final DecoderFactory decoderFactory = DecoderFactory.get();
+    static final DatumReader<Map<Utf8, ByteBuffer>> metadataReader = new GenericDatumReader<>(METADATA_SCHEMA);
 
     @Configuration
     @EnableAutoConfiguration
@@ -77,7 +101,7 @@ abstract class AbstractPostgresEventStoreIT {
         private static final String DESERIALIZER_CLASS = "io.confluent.kafka.serializers.KafkaAvroDeserializer";
 
         @Bean
-        Deserializer<Object> kafkaAvroDeserializer(@Value("${schema.registry.url}") String schemaRegistryUrl) {
+        Deserializer<SpecificRecord> kafkaAvroDeserializer(@Value("${schema.registry.url}") String schemaRegistryUrl) {
             var deserializerConfig = Map.of(
                     "value.subject.name.strategy", "io.confluent.kafka.serializers.subject.RecordNameStrategy",
                     "specific.avro.reader", true,
@@ -97,11 +121,11 @@ abstract class AbstractPostgresEventStoreIT {
          * @return new Kafka Avro Serializer instance
          */
         @SuppressWarnings("unchecked")
-        private Deserializer<Object> getDeserializerInstance() {
+        private Deserializer<SpecificRecord> getDeserializerInstance() {
             try {
                 var ctor = Class.forName(DESERIALIZER_CLASS).getConstructor();
 
-                return (Deserializer<Object>) ctor.newInstance();
+                return (Deserializer<SpecificRecord>) ctor.newInstance();
             } catch (Exception e) {
                 throw new IllegalArgumentException("Unable to instantiate deserializer " + DESERIALIZER_CLASS, e);
             }
@@ -117,13 +141,11 @@ abstract class AbstractPostgresEventStoreIT {
                 .block();
     }
 
-    @Test
-    void savesEventInDatabase() {
+    @ParameterizedTest
+    @MethodSource("testEvents")
+    void savesEventInDatabase(Event<TestPayload> event) {
         // Given
         var topic = "test_events";
-        var key = UUID.randomUUID();
-        var payload = TestPayload.newBuilder().setText("test payload").build();
-        var event = Event.from(key, payload);
 
         var eventCount = databaseClient
                 .sql("SELECT count(*) FROM events.test_events")
@@ -149,18 +171,20 @@ abstract class AbstractPostgresEventStoreIT {
 
         StepVerifier
                 .create(retrievedEvent)
-                .expectNext(event)
+                .expectNextMatches(
+                        nextEvent -> nextEvent.key().equals(event.key())
+                                && nextEvent.payload().equals(event.payload())
+                                && nextEvent.timestamp().equals(event.timestamp())
+                                && isEqual(nextEvent.metadata(), event.metadata()))
                 .as("finds stored event with the same data")
                 .verifyComplete();
     }
 
-    @Test
-    void returnsStoredEvent() {
+    @ParameterizedTest
+    @MethodSource("testEvents")
+    void returnsStoredEvent(Event<TestPayload> event) {
         // Given
         var topic = "test_events";
-        var key = UUID.randomUUID();
-        var payload = TestPayload.newBuilder().setText("test payload").build();
-        var event = Event.from(key, payload);
 
         // When
         var storedEvent = eventStore.save(topic, event);
@@ -173,15 +197,99 @@ abstract class AbstractPostgresEventStoreIT {
                 .verifyComplete();
     }
 
+    @Test
+    void throwsExceptionWhenInvalidMetadataValueType() {
+        // Given
+        var topic = "test_events";
+
+        var key = UUID.randomUUID();
+        var payload = TestPayload.newBuilder().setText("test payload").build();
+        var timestamp = Instant.ofEpochMilli(1736026628567l);
+        var metadataWithInvalidValueType = Map.<String, Object>of("meta1", 123);
+
+        var event = Event.from(key, payload, timestamp, metadataWithInvalidValueType);
+
+        // When
+        var thrown = assertThrows(Throwable.class, () -> eventStore.save(topic, event).block());
+
+        // Then
+        assertThat(thrown)
+                .describedAs("thrown exception")
+                .isInstanceOf(ClassCastException.class);
+    }
+
+    static Stream<Arguments> testEvents() {
+        return Stream.of(
+                arguments(
+                        named(
+                                "payload only",
+                                Event.from(TestPayload.newBuilder().setText("test payload 1").build()))),
+                arguments(
+                        named(
+                                "key and payload",
+                                Event.from(
+                                        UUID.fromString("ea09ab50-8564-485f-9363-d4a4b3d6e9ca"),
+                                        TestPayload.newBuilder().setText("test payload 2").build()))),
+                arguments(
+                        named(
+                                "key, payload and timestamp",
+                                Event.from(
+                                        UUID.fromString("58ce74c8-64d3-45d0-a35b-f99e8e551a51"),
+                                        TestPayload.newBuilder().setText("test payload 3").build(),
+                                        Instant.ofEpochMilli(1736025221442l)))),
+                arguments(
+                        named(
+                                "key, payload, timestamp and metadata",
+                                Event.from(
+                                        UUID.fromString("ba7b9608-ccae-472c-99cf-b29e038adab1"),
+                                        TestPayload.newBuilder().setText("test payload 4").build(),
+                                        Instant.ofEpochMilli(1736026528567l),
+                                        Map.of(
+                                                "meta1", "meta1_value".getBytes(),
+                                                "meta2", UUID.randomUUID().toString().getBytes(),
+                                                "meta3", Long.toString(123l).getBytes())))));
+    }
+
     private Mono<Event<?>> toEvent(Map<String, Object> row) {
         var key = (UUID) row.get("key");
         var data = (ByteBuffer) row.get("data");
+        var metadata = (ByteBuffer) row.get("metadata");
         var timestamp = (OffsetDateTime) row.get("timestamp");
 
         return Mono
                 .just(data.array())
                 .publishOn(Schedulers.boundedElastic())
                 .map(bytes -> kafkaAvroDeserializer.deserialize(null, bytes))
-                .map(payload -> Event.from(key, (SpecificRecord) payload, timestamp.toInstant()));
+                .map(payload -> Event.from(key, payload, timestamp.toInstant(), deserialize(metadata)));
+    }
+
+    private Map<String, Object> deserialize(ByteBuffer metadata) {
+        if (metadata == null) {
+            return Map.of();
+        }
+
+        try {
+            var decoder = decoderFactory.binaryDecoder(metadata.array(), null);
+
+            return metadataReader
+                    .read(null, decoder)
+                    .entrySet()
+                    .stream()
+                    .map(entry -> Map.entry(entry.getKey().toString(), entry.getValue().array()))
+                    .collect(toMap(Map.Entry::getKey, Map.Entry::getValue));
+        } catch (IOException e) {
+            throw new UncheckedIOException("Unable to deserialize metadata", e);
+        }
+    }
+
+    private boolean isEqual(Map<String, Object> actual, Map<String, Object> expected) {
+        if (actual.size() != expected.size()) {
+            return false;
+        }
+
+        return actual
+                .entrySet()
+                .stream()
+                .allMatch(e -> Arrays.equals((byte[]) e.getValue(), (byte[]) expected.get(e.getKey())));
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023, Dariusz Szpakowski
+ * Copyright (c) 2023-2025, Dariusz Szpakowski
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -25,11 +25,22 @@
 
 package tech.kage.event.postgres;
 
+import static java.util.stream.Collectors.toMap;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.ByteBuffer;
 import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
+import org.apache.avro.Schema;
+import org.apache.avro.SchemaBuilder;
+import org.apache.avro.generic.GenericDatumWriter;
+import org.apache.avro.io.DatumWriter;
+import org.apache.avro.io.EncoderFactory;
 import org.apache.avro.specific.SpecificRecord;
 import org.apache.kafka.common.serialization.Serializer;
 import org.springframework.beans.factory.annotation.Value;
@@ -63,6 +74,10 @@ public class PostgresEventStore implements EventStore {
     private static final String INSERT_EVENT_SQL = """
                 INSERT INTO events.%s (key, data, timestamp)
                 VALUES (:key, :data, :timestamp)
+            """;
+    private static final String INSERT_EVENT_WITH_METADATA_SQL = """
+                INSERT INTO events.%s (key, data, metadata, timestamp)
+                VALUES (:key, :data, :metadata, :timestamp)
             """;
 
     private static final String SERIALIZER_CLASS = "io.confluent.kafka.serializers.KafkaAvroSerializer";
@@ -106,10 +121,16 @@ public class PostgresEventStore implements EventStore {
                 .fromCallable(() -> kafkaAvroSerializer.serialize(topic, event.payload()))
                 .subscribeOn(Schedulers.boundedElastic())
                 .flatMap(serialized -> databaseClient
-                        .sql(INSERT_EVENT_SQL.formatted(topic))
+                        .sql(event.metadata().isEmpty()
+                                ? INSERT_EVENT_SQL.formatted(topic)
+                                : INSERT_EVENT_WITH_METADATA_SQL.formatted(topic))
                         .bind("key", event.key())
                         .bind("data", serialized)
                         .bind("timestamp", event.timestamp().atOffset(ZoneOffset.UTC))
+                        .bindValues(
+                                event.metadata().isEmpty()
+                                        ? Map.of()
+                                        : Map.of("metadata", MetadataSerializer.serialize(event.metadata())))
                         .fetch()
                         .rowsUpdated())
                 .map(oneInserted -> event);
@@ -130,6 +151,41 @@ public class PostgresEventStore implements EventStore {
             return (Serializer<Object>) ctor.newInstance();
         } catch (Exception e) {
             throw new IllegalArgumentException("Unable to instantiate serializer " + SERIALIZER_CLASS, e);
+        }
+    }
+
+    /**
+     * Serializer of event metadata to an Avro map.
+     */
+    private static class MetadataSerializer {
+        private static final Schema METADATA_SCHEMA = SchemaBuilder.map().values().bytesType();
+
+        private static final EncoderFactory encoderFactory = EncoderFactory.get();
+        private static final DatumWriter<Map<String, ByteBuffer>> writer = new GenericDatumWriter<>(METADATA_SCHEMA);
+
+        /**
+         * Serialize the given metadata map to an Avro map.
+         * 
+         * @param metadata metadata map to serialize
+         * 
+         * @return bytes representing the serialized Avro map
+         */
+        private static byte[] serialize(Map<String, Object> metadata) {
+            var convertedMetadata = metadata
+                    .entrySet()
+                    .stream()
+                    .map(entry -> Map.entry(entry.getKey(), ByteBuffer.wrap((byte[]) entry.getValue())))
+                    .collect(toMap(Map.Entry::getKey, Map.Entry::getValue));
+
+            try (var out = new ByteArrayOutputStream()) {
+                var encoder = encoderFactory.directBinaryEncoder(out, null);
+
+                writer.write(convertedMetadata, encoder);
+
+                return out.toByteArray();
+            } catch (IOException e) {
+                throw new UncheckedIOException("Unable to serialize metadata: " + metadata, e);
+            }
         }
     }
 }
