@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023-2025, Dariusz Szpakowski
+ * Copyright (c) 2025, Dariusz Szpakowski
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -24,26 +24,20 @@
  */
 
 /**
- * A PostgreSQL-based implementation of {@link tech.kage.event.EventStore}.
+ * Provides Event Store cryptography support.
  * 
  * @author Dariusz Szpakowski
  */
-module tech.kage.event.postgres {
+module tech.kage.event.crypto {
     requires transitive tech.kage.event;
-    requires tech.kage.event.crypto;
 
     requires spring.beans;
-    requires spring.boot.autoconfigure;
     requires spring.context;
     requires spring.core;
 
-    requires spring.r2dbc;
-    requires java.sql;
+    requires transitive com.google.crypto.tink;
 
-    requires transitive org.apache.avro;
-    requires kafka.clients;
+    exports tech.kage.event.crypto to tech.kage.event.postgres, spring.beans, spring.context;
 
-    exports tech.kage.event.postgres;
-
-    opens tech.kage.event.postgres to spring.core, org.apache.avro;
+    opens tech.kage.event.crypto to spring.core;
 }

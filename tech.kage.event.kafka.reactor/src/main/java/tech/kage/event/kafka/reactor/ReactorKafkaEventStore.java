@@ -25,6 +25,7 @@
 
 package tech.kage.event.kafka.reactor;
 
+import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Collection;
@@ -216,6 +217,11 @@ public class ReactorKafkaEventStore implements EventStore {
                                                 .toList()),
                                 null)))
                 .then(Mono.just(event));
+    }
+
+    @Override
+    public <T extends SpecificRecord> Mono<Event<T>> save(String topic, Event<T> event, URI encryptionKey) {
+        throw new UnsupportedOperationException("Unimplemented method 'save'");
     }
 
     /**

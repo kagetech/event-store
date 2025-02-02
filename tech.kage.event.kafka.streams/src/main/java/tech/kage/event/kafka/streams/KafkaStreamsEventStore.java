@@ -25,6 +25,7 @@
 
 package tech.kage.event.kafka.streams;
 
+import java.net.URI;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.HashMap;
@@ -129,6 +130,11 @@ public class KafkaStreamsEventStore implements EventStore {
                                                 .map(Header.class::cast)
                                                 .toList())))
                 .then(Mono.just(event));
+    }
+
+    @Override
+    public <T extends SpecificRecord> Mono<Event<T>> save(String topic, Event<T> event, URI encryptionKey) {
+        throw new UnsupportedOperationException("Unimplemented method 'save'");
     }
 
     /**

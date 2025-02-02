@@ -25,20 +25,21 @@
 
 package tech.kage.event.postgres;
 
-import static java.util.stream.Collectors.toMap;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Named.named;
 import static org.junit.jupiter.params.provider.Arguments.arguments;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Map;
+import java.util.SequencedMap;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -51,7 +52,6 @@ import org.apache.avro.specific.SpecificRecord;
 import org.apache.avro.util.Utf8;
 import org.apache.kafka.common.serialization.Deserializer;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -66,10 +66,9 @@ import org.springframework.core.io.Resource;
 import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.test.context.ActiveProfiles;
 
-import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
 import tech.kage.event.Event;
+import tech.kage.event.crypto.MetadataSerializer;
 
 /**
  * Integration tests for {@link PostgresEventStore}.
@@ -159,6 +158,11 @@ abstract class AbstractPostgresEventStoreIT {
                 .as("empty events table at test start")
                 .verifyComplete();
 
+        var expectedKey = event.key();
+        var expectedPayload = event.payload();
+        var expectedTimestamp = event.timestamp();
+        var expectedMetadata = new TreeMap<>(event.metadata()); // the expected metadata are sorted by key
+
         // When
         eventStore.save(topic, event).block();
 
@@ -166,16 +170,26 @@ abstract class AbstractPostgresEventStoreIT {
         var retrievedEvent = databaseClient
                 .sql("SELECT * FROM events.test_events")
                 .fetch()
-                .one()
-                .flatMap(this::toEvent);
+                .one();
 
         StepVerifier
                 .create(retrievedEvent)
-                .expectNextMatches(
-                        nextEvent -> nextEvent.key().equals(event.key())
-                                && nextEvent.payload().equals(event.payload())
-                                && nextEvent.timestamp().equals(event.timestamp())
-                                && isEqual(nextEvent.metadata(), event.metadata()))
+                .expectNextMatches(row -> {
+                    var key = (UUID) row.get("key");
+                    var data = (ByteBuffer) row.get("data");
+                    var metadata = (ByteBuffer) row.get("metadata");
+                    var timestamp = ((OffsetDateTime) row.get("timestamp")).toInstant();
+
+                    var payload = kafkaAvroDeserializer.deserialize(null, data.array());
+                    var deserializedMetadata = metadata != null
+                            ? MetadataSerializer.deserialize(metadata.array())
+                            : Collections.<String, Object>emptySortedMap();
+
+                    return key.equals(expectedKey)
+                            && payload.equals(expectedPayload)
+                            && timestamp.equals(expectedTimestamp)
+                            && isEqualOrdered(deserializedMetadata, expectedMetadata);
+                })
                 .as("finds stored event with the same data")
                 .verifyComplete();
     }
@@ -197,17 +211,11 @@ abstract class AbstractPostgresEventStoreIT {
                 .verifyComplete();
     }
 
-    @Test
-    void throwsExceptionWhenInvalidMetadataValueType() {
+    @ParameterizedTest
+    @MethodSource("testInvalidMetadata")
+    void throwsExceptionWhenInvalidMetadata(Event<TestPayload> event, Class<?> expectedException) {
         // Given
         var topic = "test_events";
-
-        var key = UUID.randomUUID();
-        var payload = TestPayload.newBuilder().setText("test payload").build();
-        var timestamp = Instant.ofEpochMilli(1736026628567l);
-        var metadataWithInvalidValueType = Map.<String, Object>of("meta1", 123);
-
-        var event = Event.from(key, payload, timestamp, metadataWithInvalidValueType);
 
         // When
         var thrown = assertThrows(Throwable.class, () -> eventStore.save(topic, event).block());
@@ -215,7 +223,7 @@ abstract class AbstractPostgresEventStoreIT {
         // Then
         assertThat(thrown)
                 .describedAs("thrown exception")
-                .isInstanceOf(ClassCastException.class);
+                .isInstanceOf(expectedException);
     }
 
     static Stream<Arguments> testEvents() {
@@ -245,51 +253,80 @@ abstract class AbstractPostgresEventStoreIT {
                                         TestPayload.newBuilder().setText("test payload 4").build(),
                                         Instant.ofEpochMilli(1736026528567l),
                                         Map.of(
-                                                "meta1", "meta1_value".getBytes(),
-                                                "meta2", UUID.randomUUID().toString().getBytes(),
-                                                "meta3", Long.toString(123l).getBytes())))));
+                                                "dTest", "meta_value".getBytes(),
+                                                "zTest", UUID.randomUUID().toString().getBytes(),
+                                                "bTest", Long.toString(123l).getBytes())))));
     }
 
-    private Mono<Event<?>> toEvent(Map<String, Object> row) {
-        var key = (UUID) row.get("key");
-        var data = (ByteBuffer) row.get("data");
-        var metadata = (ByteBuffer) row.get("metadata");
-        var timestamp = (OffsetDateTime) row.get("timestamp");
-
-        return Mono
-                .just(data.array())
-                .publishOn(Schedulers.boundedElastic())
-                .map(bytes -> kafkaAvroDeserializer.deserialize(null, bytes))
-                .map(payload -> Event.from(key, payload, timestamp.toInstant(), deserialize(metadata)));
+    static Stream<Arguments> testInvalidMetadata() {
+        return Stream.of(
+                arguments(
+                        named(
+                                "invalid metadata value type",
+                                Event.from(
+                                        UUID.fromString("ba7b9608-ccae-472c-99cf-b29e038adab1"),
+                                        TestPayload.newBuilder().setText("test payload 4").build(),
+                                        Instant.ofEpochMilli(1736026528567l),
+                                        Map.of(
+                                                "dTest", 123,
+                                                "zTest", UUID.randomUUID().toString().getBytes(),
+                                                "bTest", Long.toString(123l).getBytes()))),
+                        ClassCastException.class),
+                arguments(
+                        named(
+                                "id in metadata",
+                                Event.from(
+                                        UUID.fromString("ba7b9608-ccae-472c-99cf-b29e038adab1"),
+                                        TestPayload.newBuilder().setText("test payload 4").build(),
+                                        Instant.ofEpochMilli(1736026528567l),
+                                        Map.of(
+                                                "id", "123".getBytes(),
+                                                "zTest", UUID.randomUUID().toString().getBytes(),
+                                                "bTest", Long.toString(123l).getBytes()))),
+                        IllegalArgumentException.class),
+                arguments(
+                        named(
+                                "kid in metadata",
+                                Event.from(
+                                        UUID.fromString("ba7b9608-ccae-472c-99cf-b29e038adab1"),
+                                        TestPayload.newBuilder().setText("test payload 4").build(),
+                                        Instant.ofEpochMilli(1736026528567l),
+                                        Map.of(
+                                                "dTest", "meta_value".getBytes(),
+                                                "kid", UUID.randomUUID().toString().getBytes(),
+                                                "bTest", Long.toString(123l).getBytes()))),
+                        IllegalArgumentException.class));
     }
 
-    private Map<String, Object> deserialize(ByteBuffer metadata) {
-        if (metadata == null) {
-            return Map.of();
-        }
-
-        try {
-            var decoder = decoderFactory.binaryDecoder(metadata.array(), null);
-
-            return metadataReader
-                    .read(null, decoder)
-                    .entrySet()
-                    .stream()
-                    .map(entry -> Map.entry(entry.getKey().toString(), entry.getValue().array()))
-                    .collect(toMap(Map.Entry::getKey, Map.Entry::getValue));
-        } catch (IOException e) {
-            throw new UncheckedIOException("Unable to deserialize metadata", e);
-        }
-    }
-
-    private boolean isEqual(Map<String, Object> actual, Map<String, Object> expected) {
+    protected boolean isEqualOrdered(SequencedMap<String, Object> actual, Map<String, Object> expected) {
         if (actual.size() != expected.size()) {
             return false;
         }
 
-        return actual
-                .entrySet()
-                .stream()
-                .allMatch(e -> Arrays.equals((byte[]) e.getValue(), (byte[]) expected.get(e.getKey())));
+        var actualKeys = actual.keySet().iterator();
+        var expectedKeys = expected.keySet().iterator();
+
+        while (actualKeys.hasNext()) {
+            var nextActualKey = actualKeys.next();
+            var nextExpectedKey = expectedKeys.next();
+
+            var nextActualValue = actual.get(nextActualKey);
+            var nextExpectedValue = expected.get(nextExpectedKey);
+
+            if (!nextActualKey.equals(nextExpectedKey)) {
+                return false;
+            }
+
+            if (nextActualValue instanceof byte[] actualBytes
+                    && nextExpectedValue instanceof byte[] expectedBytes) {
+                if (!Arrays.equals(actualBytes, expectedBytes)) {
+                    return false;
+                }
+            } else if (!nextActualValue.equals(nextExpectedValue)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }
