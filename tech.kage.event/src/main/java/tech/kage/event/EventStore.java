@@ -25,6 +25,8 @@
 
 package tech.kage.event;
 
+import java.net.URI;
+
 import org.apache.avro.specific.SpecificRecord;
 
 import reactor.core.publisher.Mono;
@@ -36,6 +38,16 @@ import reactor.core.publisher.Mono;
  */
 public interface EventStore {
     /**
+     * Constant representing the event identifier in the source database.
+     */
+    static final String SOURCE_ID = "id";
+
+    /**
+     * Constant representing the encryption key identifier.
+     */
+    static final String ENCRYPTION_KEY_ID = "kid";
+
+    /**
      * Saves the specified event in the event store.
      *
      * @param <T>   the event's payload type
@@ -44,9 +56,33 @@ public interface EventStore {
      *
      * @return saved event
      * 
-     * @throws NullPointerException if the specified topic or event is null
-     * @throws ClassCastException   if the specified event contains metadata of type
-     *                              different from {@code byte[]}
+     * @throws NullPointerException     if the specified topic or event is null
+     * @throws ClassCastException       if the specified event contains metadata of
+     *                                  type different from {@code byte[]}
+     * @throws IllegalArgumentException if the specified event contains metadata
+     *                                  with key {@code id} or {@code kid}
      */
     <T extends SpecificRecord> Mono<Event<T>> save(String topic, Event<T> event);
+
+    /**
+     * Saves the specified event in the event store in its authenticated and
+     * encrypted form. The encryption scheme used is Authenticated Encryption with
+     * Associated Data (AEAD). The {@code Event}'s payload is encrypted and the key,
+     * timestamp and metadata are the associated non-encrypted authenticated data.
+     *
+     * @param <T>           the event's payload type
+     * @param topic         topic which is used for grouping events
+     * @param event         event to be saved
+     * @param encryptionKey encryption key to use
+     *
+     * @return saved event in its unencrypted form
+     * 
+     * @throws NullPointerException     if the specified topic, event or
+     *                                  encryptionKey is null
+     * @throws ClassCastException       if the specified event contains metadata of
+     *                                  type different from {@code byte[]}
+     * @throws IllegalArgumentException if the specified event contains metadata
+     *                                  with key {@code id} or {@code kid}
+     */
+    <T extends SpecificRecord> Mono<Event<T>> save(String topic, Event<T> event, URI encryptionKey);
 }
