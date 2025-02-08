@@ -25,6 +25,8 @@
 
 package tech.kage.event.replicator.entity;
 
+import static java.util.Comparator.comparing;
+import static java.util.stream.Collectors.toCollection;
 import static org.assertj.core.api.Assertions.assertThat;
 import static tech.kage.event.EventStore.SOURCE_ID;
 import static tech.kage.event.replicator.entity.EventReplicator.PROGRESS_TOPIC;
@@ -38,6 +40,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -170,20 +173,25 @@ class EventReplicatorWorkerIT {
                             .describedAs("replicated event timestamp")
                             .isEqualTo(sourceEvent.timestamp().toEpochMilli());
 
-                    var expectedHeaders = new RecordHeaders(
-                            sourceEvent
-                                    .metadata()
-                                    .entrySet()
-                                    .stream()
-                                    .map(e -> new RecordHeader(e.getKey(), ((ByteBuffer) e.getValue()).array()))
-                                    .map(Header.class::cast)
-                                    .toList());
+                    var expectedHeaderList = sourceEvent
+                            .metadata()
+                            .entrySet()
+                            .stream()
+                            .map(e -> new RecordHeader(e.getKey(), (byte[]) e.getValue()))
+                            .map(Header.class::cast)
+                            .collect(toCollection(ArrayList::new));
 
-                    expectedHeaders.add(new RecordHeader(SOURCE_ID, Long.toString(sourceEvent.id()).getBytes()));
+                    expectedHeaderList.add(new RecordHeader(SOURCE_ID, Long.toString(sourceEvent.id()).getBytes()));
+
+                    var expectedHeaders = new RecordHeaders(
+                            expectedHeaderList
+                                    .stream()
+                                    .sorted(comparing(Header::key))
+                                    .toList());
 
                     assertThat(replicatedEvent.headers())
                             .describedAs("replicated event headers")
-                            .hasSameElementsAs(expectedHeaders);
+                            .isEqualTo(expectedHeaders);
                 });
     }
 
@@ -226,20 +234,25 @@ class EventReplicatorWorkerIT {
                             .describedAs("replicated event timestamp")
                             .isEqualTo(sourceEvent.timestamp().toEpochMilli());
 
-                    var expectedHeaders = new RecordHeaders(
-                            sourceEvent
-                                    .metadata()
-                                    .entrySet()
-                                    .stream()
-                                    .map(e -> new RecordHeader(e.getKey(), ((ByteBuffer) e.getValue()).array()))
-                                    .map(Header.class::cast)
-                                    .toList());
+                    var expectedHeaderList = sourceEvent
+                            .metadata()
+                            .entrySet()
+                            .stream()
+                            .map(e -> new RecordHeader(e.getKey(), (byte[]) e.getValue()))
+                            .map(Header.class::cast)
+                            .collect(toCollection(ArrayList::new));
 
-                    expectedHeaders.add(new RecordHeader(SOURCE_ID, Long.toString(sourceEvent.id()).getBytes()));
+                    expectedHeaderList.add(new RecordHeader(SOURCE_ID, Long.toString(sourceEvent.id()).getBytes()));
+
+                    var expectedHeaders = new RecordHeaders(
+                            expectedHeaderList
+                                    .stream()
+                                    .sorted(comparing(Header::key))
+                                    .toList());
 
                     assertThat(replicatedEvent.headers())
                             .describedAs("replicated event headers")
-                            .hasSameElementsAs(expectedHeaders);
+                            .isEqualTo(expectedHeaders);
                 });
     }
 
@@ -284,20 +297,25 @@ class EventReplicatorWorkerIT {
                             .describedAs("replicated event timestamp")
                             .isEqualTo(sourceEvent.timestamp().toEpochMilli());
 
-                    var expectedHeaders = new RecordHeaders(
-                            sourceEvent
-                                    .metadata()
-                                    .entrySet()
-                                    .stream()
-                                    .map(e -> new RecordHeader(e.getKey(), ((ByteBuffer) e.getValue()).array()))
-                                    .map(Header.class::cast)
-                                    .toList());
+                    var expectedHeaderList = sourceEvent
+                            .metadata()
+                            .entrySet()
+                            .stream()
+                            .map(e -> new RecordHeader(e.getKey(), (byte[]) e.getValue()))
+                            .map(Header.class::cast)
+                            .collect(toCollection(ArrayList::new));
 
-                    expectedHeaders.add(new RecordHeader(SOURCE_ID, Long.toString(sourceEvent.id()).getBytes()));
+                    expectedHeaderList.add(new RecordHeader(SOURCE_ID, Long.toString(sourceEvent.id()).getBytes()));
+
+                    var expectedHeaders = new RecordHeaders(
+                            expectedHeaderList
+                                    .stream()
+                                    .sorted(comparing(Header::key))
+                                    .toList());
 
                     assertThat(replicatedEvent.headers())
                             .describedAs("replicated event headers")
-                            .hasSameElementsAs(expectedHeaders);
+                            .isEqualTo(expectedHeaders);
                 });
     }
 
@@ -402,9 +420,9 @@ class EventReplicatorWorkerIT {
                 UUID.randomUUID(),
                 ("test payload " + id).getBytes(),
                 Map.of(
-                        "meta1", ByteBuffer.wrap("meta1_value".getBytes()),
-                        "meta2", ByteBuffer.wrap(UUID.randomUUID().toString().getBytes()),
-                        "meta3", ByteBuffer.wrap(Long.toString(id).getBytes())),
+                        "dTest", "meta_value".getBytes(),
+                        "zTest", UUID.randomUUID().toString().getBytes(),
+                        "bTest", Long.toString(id).getBytes()),
                 Instant.now());
     }
 

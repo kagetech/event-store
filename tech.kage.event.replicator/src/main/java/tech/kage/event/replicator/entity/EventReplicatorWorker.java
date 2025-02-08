@@ -25,6 +25,7 @@
 
 package tech.kage.event.replicator.entity;
 
+import static java.util.Comparator.comparing;
 import static tech.kage.event.EventStore.SOURCE_ID;
 
 import java.nio.ByteBuffer;
@@ -202,6 +203,7 @@ class EventReplicatorWorker implements Runnable {
                         MetadataSerializer.deserialize(metadata).entrySet().stream())
                 .map(e -> new RecordHeader(e.getKey().toString(), (byte[]) e.getValue()))
                 .map(Header.class::cast)
+                .sorted(comparing(Header::key)) // sort again after adding the id header
                 .toList();
     }
 
