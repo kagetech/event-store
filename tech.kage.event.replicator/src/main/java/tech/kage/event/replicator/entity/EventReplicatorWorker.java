@@ -25,8 +25,8 @@
 
 package tech.kage.event.replicator.entity;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
+import static tech.kage.event.EventStore.SOURCE_ID;
+
 import java.nio.ByteBuffer;
 import java.sql.Timestamp;
 import java.util.List;
@@ -34,12 +34,6 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Stream;
 
-import org.apache.avro.Schema;
-import org.apache.avro.SchemaBuilder;
-import org.apache.avro.generic.GenericDatumReader;
-import org.apache.avro.io.DatumReader;
-import org.apache.avro.io.DecoderFactory;
-import org.apache.avro.util.Utf8;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.header.internals.RecordHeader;
@@ -49,6 +43,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
+import tech.kage.event.crypto.MetadataSerializer;
 
 /**
  * Worker component responsible for replicating events from a single event table
@@ -72,11 +67,6 @@ class EventReplicatorWorker implements Runnable {
      * SQL query used for selecting the id of the last event.
      */
     private static final String SELECT_LAST_EVENT_ID_SQL = "SELECT last_value FROM %s.%s_id_seq";
-
-    /**
-     * Kafka record header storing the id of an event in the source database.
-     */
-    private static final String RECORD_HEADER_ID = "id";
 
     /**
      * Configuration property defining the maximum number of events replicated in
@@ -208,9 +198,9 @@ class EventReplicatorWorker implements Runnable {
     private List<Header> toHeaders(Long id, byte[] metadata) {
         return Stream
                 .concat(
-                        Stream.of(Map.entry(new Utf8(RECORD_HEADER_ID), ByteBuffer.wrap(Long.toString(id).getBytes()))),
-                        MetadataDeserializer.deserialize(metadata).entrySet().stream())
-                .map(e -> new RecordHeader(e.getKey().toString(), e.getValue().array()))
+                        Stream.of(Map.entry(SOURCE_ID, Long.toString(id).getBytes())),
+                        MetadataSerializer.deserialize(metadata).entrySet().stream())
+                .map(e -> new RecordHeader(e.getKey().toString(), (byte[]) e.getValue()))
                 .map(Header.class::cast)
                 .toList();
     }
@@ -234,32 +224,5 @@ class EventReplicatorWorker implements Runnable {
                 Long.class);
 
         return lastSourceId - lastId;
-    }
-
-    /**
-     * Deserializer of event metadata from an Avro map.
-     */
-    private static class MetadataDeserializer {
-        private static final Schema METADATA_SCHEMA = SchemaBuilder.map().values().bytesType();
-
-        private static final DecoderFactory decoderFactory = DecoderFactory.get();
-        private static final DatumReader<Map<Utf8, ByteBuffer>> reader = new GenericDatumReader<>(METADATA_SCHEMA);
-
-        /**
-         * Deserialize the given Avro map to event metadata.
-         * 
-         * @param metadata bytes representing the serialized Avro map with metadata
-         * 
-         * @return deserialized metadata map
-         */
-        private static Map<Utf8, ByteBuffer> deserialize(byte[] metadata) {
-            try {
-                var decoder = decoderFactory.binaryDecoder(metadata, null);
-
-                return reader.read(null, decoder);
-            } catch (IOException e) {
-                throw new UncheckedIOException("Unable to deserialize metadata: " + metadata, e);
-            }
-        }
     }
 }

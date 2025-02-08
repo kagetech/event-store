@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023-2024, Dariusz Szpakowski
+ * Copyright (c) 2023-2025, Dariusz Szpakowski
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -29,6 +29,9 @@
  * @author Dariusz Szpakowski
  */
 module tech.kage.event.replicator {
+    requires tech.kage.event;
+    requires tech.kage.event.crypto;
+
     requires spring.boot;
     requires spring.boot.autoconfigure;
 
@@ -46,7 +49,6 @@ module tech.kage.event.replicator {
     requires transitive spring.kafka;
     requires spring.messaging;
     requires kafka.clients;
-    requires org.apache.avro;
 
     requires micrometer.core;
 

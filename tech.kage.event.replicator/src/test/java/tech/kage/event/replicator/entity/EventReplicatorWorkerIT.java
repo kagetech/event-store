@@ -26,9 +26,9 @@
 package tech.kage.event.replicator.entity;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static tech.kage.event.EventStore.SOURCE_ID;
 import static tech.kage.event.replicator.entity.EventReplicator.PROGRESS_TOPIC;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.Reader;
@@ -43,11 +43,6 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.stream.IntStream;
 
-import org.apache.avro.Schema;
-import org.apache.avro.SchemaBuilder;
-import org.apache.avro.generic.GenericDatumWriter;
-import org.apache.avro.io.DatumWriter;
-import org.apache.avro.io.EncoderFactory;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.header.Header;
@@ -74,6 +69,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.kafka.KafkaContainer;
 
 import io.micrometer.core.instrument.MeterRegistry;
+import tech.kage.event.crypto.MetadataSerializer;
 
 /**
  * Integration tests for {@link EventReplicatorWorker}.
@@ -106,11 +102,6 @@ class EventReplicatorWorkerIT {
     private String eventSchema;
 
     private String topic;
-
-    static final Schema METADATA_SCHEMA = SchemaBuilder.map().values().bytesType();
-
-    static final EncoderFactory encoderFactory = EncoderFactory.get();
-    static final DatumWriter<Map<String, ByteBuffer>> writer = new GenericDatumWriter<>(METADATA_SCHEMA);
 
     @Container
     @ServiceConnection
@@ -188,7 +179,7 @@ class EventReplicatorWorkerIT {
                                     .map(Header.class::cast)
                                     .toList());
 
-                    expectedHeaders.add(new RecordHeader("id", Long.toString(sourceEvent.id()).getBytes()));
+                    expectedHeaders.add(new RecordHeader(SOURCE_ID, Long.toString(sourceEvent.id()).getBytes()));
 
                     assertThat(replicatedEvent.headers())
                             .describedAs("replicated event headers")
@@ -244,7 +235,7 @@ class EventReplicatorWorkerIT {
                                     .map(Header.class::cast)
                                     .toList());
 
-                    expectedHeaders.add(new RecordHeader("id", Long.toString(sourceEvent.id()).getBytes()));
+                    expectedHeaders.add(new RecordHeader(SOURCE_ID, Long.toString(sourceEvent.id()).getBytes()));
 
                     assertThat(replicatedEvent.headers())
                             .describedAs("replicated event headers")
@@ -302,7 +293,7 @@ class EventReplicatorWorkerIT {
                                     .map(Header.class::cast)
                                     .toList());
 
-                    expectedHeaders.add(new RecordHeader("id", Long.toString(sourceEvent.id()).getBytes()));
+                    expectedHeaders.add(new RecordHeader(SOURCE_ID, Long.toString(sourceEvent.id()).getBytes()));
 
                     assertThat(replicatedEvent.headers())
                             .describedAs("replicated event headers")
@@ -382,7 +373,7 @@ class EventReplicatorWorkerIT {
                         "INSERT INTO events." + topic + " (key, data, metadata, timestamp) VALUES (?, ?, ?, ?)",
                         event.key(),
                         event.data(),
-                        serializeMetadata(event.metadata()),
+                        MetadataSerializer.serialize(event.metadata()),
                         event.timestamp().atOffset(ZoneOffset.UTC));
     }
 
@@ -417,18 +408,6 @@ class EventReplicatorWorkerIT {
                 Instant.now());
     }
 
-    private byte[] serializeMetadata(Map<String, ByteBuffer> metadata) {
-        try (var out = new ByteArrayOutputStream()) {
-            var encoder = encoderFactory.directBinaryEncoder(out, null);
-
-            writer.write(metadata, encoder);
-
-            return out.toByteArray();
-        } catch (IOException e) {
-            throw new UncheckedIOException("Unable to serialize metadata: " + metadata, e);
-        }
-    }
-
-    private record EventData(long id, UUID key, byte[] data, Map<String, ByteBuffer> metadata, Instant timestamp) {
+    private record EventData(long id, UUID key, byte[] data, Map<String, Object> metadata, Instant timestamp) {
     }
 }
