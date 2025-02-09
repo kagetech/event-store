@@ -38,7 +38,11 @@ module tech.kage.event.crypto {
     requires transitive com.google.crypto.tink;
 
     exports tech.kage.event.crypto
-            to tech.kage.event.postgres, tech.kage.event.replicator, spring.beans, spring.context;
+            to tech.kage.event.kafka.reactor,
+            tech.kage.event.postgres,
+            tech.kage.event.replicator,
+            spring.beans,
+            spring.context;
 
     opens tech.kage.event.crypto to spring.core;
 }

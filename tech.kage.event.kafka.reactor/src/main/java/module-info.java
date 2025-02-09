@@ -31,12 +31,13 @@
  */
 module tech.kage.event.kafka.reactor {
     requires transitive tech.kage.event;
+    requires tech.kage.event.crypto;
 
-    requires spring.boot.autoconfigure;
-
-    requires spring.context;
     requires spring.beans;
     requires spring.boot;
+    requires spring.boot.autoconfigure;
+    requires spring.context;
+    requires spring.core;
 
     requires reactor.kafka;
     requires kafka.clients;

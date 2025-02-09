@@ -36,6 +36,7 @@ import java.util.stream.IntStream;
 
 import org.apache.avro.specific.SpecificRecord;
 import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.common.serialization.Serializer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -92,7 +93,10 @@ class MicrometerReactorKafkaEventStoreIT {
     DatabaseClient databaseClient;
 
     @Autowired
-    SenderOptions<UUID, SpecificRecord> kafkaSenderOptions;
+    SenderOptions<UUID, byte[]> kafkaSenderOptions;
+
+    @Autowired
+    Serializer<SpecificRecord> kafkaAvroSerializer;
 
     @Autowired
     MeterRegistry meterRegistry;
@@ -261,7 +265,7 @@ class MicrometerReactorKafkaEventStoreIT {
                                             null,
                                             event.timestamp().toEpochMilli(),
                                             event.key(),
-                                            event.payload(),
+                                            kafkaAvroSerializer.serialize(topic, event.payload()),
                                             null))))
                     .blockLast();
         }

@@ -47,8 +47,7 @@ class KafkaSenderConfigurationTest {
         var kafkaProperties = new KafkaProperties();
 
         var expectedKeySerializer = "org.apache.kafka.common.serialization.UUIDSerializer";
-        var expectedValueSerializer = "io.confluent.kafka.serializers.KafkaAvroSerializer";
-        var expectedValueSubjectNameStrategy = "io.confluent.kafka.serializers.subject.RecordNameStrategy";
+        var expectedValueSerializer = "org.apache.kafka.common.serialization.ByteArraySerializer";
 
         // When
         var senderOptions = config.kafkaSenderOptions(kafkaProperties);
@@ -63,10 +62,6 @@ class KafkaSenderConfigurationTest {
         assertThat(producerProperties.get("value.serializer"))
                 .describedAs("value serializer")
                 .isEqualTo(expectedValueSerializer);
-
-        assertThat(producerProperties.get("value.subject.name.strategy"))
-                .describedAs("value subject name strategy")
-                .isEqualTo(expectedValueSubjectNameStrategy);
     }
 
     @Test
@@ -76,7 +71,7 @@ class KafkaSenderConfigurationTest {
 
         var keySerializer = StringSerializer.class;
         var valueSerializer = ByteArraySerializer.class;
-        var valueSubjectNameStrategy = "io.confluent.kafka.serializers.subject.TopicNameStrategy";
+        var testPropertyValue = "test-value";
 
         var producerConfig = kafkaProperties.getProducer();
 
@@ -85,11 +80,11 @@ class KafkaSenderConfigurationTest {
 
         kafkaProperties
                 .getProperties()
-                .put("value.subject.name.strategy", valueSubjectNameStrategy);
+                .put("test.property", testPropertyValue);
 
         var expectedKeySerializer = "org.apache.kafka.common.serialization.UUIDSerializer";
-        var expectedValueSerializer = "io.confluent.kafka.serializers.KafkaAvroSerializer";
-        var expectedValueSubjectNameStrategy = valueSubjectNameStrategy;
+        var expectedValueSerializer = "org.apache.kafka.common.serialization.ByteArraySerializer";
+        var expectedTestPropertyValue = testPropertyValue;
 
         // When
         var senderOptions = config.kafkaSenderOptions(kafkaProperties);
@@ -105,8 +100,8 @@ class KafkaSenderConfigurationTest {
                 .describedAs("value serializer")
                 .isEqualTo(expectedValueSerializer);
 
-        assertThat(producerProperties.get("value.subject.name.strategy"))
-                .describedAs("value subject name strategy")
-                .isEqualTo(expectedValueSubjectNameStrategy);
+        assertThat(producerProperties.get("test.property"))
+                .describedAs("test configuration property value")
+                .isEqualTo(expectedTestPropertyValue);
     }
 }
