@@ -55,10 +55,8 @@ class KafkaReceiverConfigurationTest {
         var expectedIsolationLevel = "read_committed";
         var expectedEnableAutoCommit = "false";
         var expectedAutoOffsetReset = "earliest";
-        var expectedSpecificAvroReader = "true";
         var expectedKeyDeserializer = "org.apache.kafka.common.serialization.UUIDDeserializer";
-        var expectedValueDeserializer = "io.confluent.kafka.serializers.KafkaAvroDeserializer";
-        var expectedValueSubjectNameStrategy = "io.confluent.kafka.serializers.subject.RecordNameStrategy";
+        var expectedValueDeserializer = "org.apache.kafka.common.serialization.ByteArrayDeserializer";
 
         // When
         var receiverOptions = config.kafkaReceiverOptions(kafkaProperties, Optional.empty());
@@ -78,10 +76,6 @@ class KafkaReceiverConfigurationTest {
                 .describedAs("auto offset reset")
                 .isEqualTo(expectedAutoOffsetReset);
 
-        assertThat(consumerProperties.get("specific.avro.reader"))
-                .describedAs("specific avro reader")
-                .isEqualTo(expectedSpecificAvroReader);
-
         assertThat(consumerProperties.get("key.deserializer"))
                 .describedAs("key deserializer")
                 .isEqualTo(expectedKeyDeserializer);
@@ -89,10 +83,6 @@ class KafkaReceiverConfigurationTest {
         assertThat(consumerProperties.get("value.deserializer"))
                 .describedAs("value deserializer")
                 .isEqualTo(expectedValueDeserializer);
-
-        assertThat(consumerProperties.get("value.subject.name.strategy"))
-                .describedAs("value subject name strategy")
-                .isEqualTo(expectedValueSubjectNameStrategy);
 
         assertThat(receiverOptions.consumerListener())
                 .describedAs("consumer listener")
@@ -148,8 +138,6 @@ class KafkaReceiverConfigurationTest {
         var expectedAutoOffsetReset = "earliest";
         var expectedSpecificAvroReader = specificAvroReader;
         var expectedKeyDeserializer = "org.apache.kafka.common.serialization.UUIDDeserializer";
-        var expectedValueDeserializer = "io.confluent.kafka.serializers.KafkaAvroDeserializer";
-        var expectedValueSubjectNameStrategy = valueSubjectNameStrategy;
 
         // When
         var receiverOptions = config.kafkaReceiverOptions(kafkaProperties, Optional.empty());
@@ -176,13 +164,5 @@ class KafkaReceiverConfigurationTest {
         assertThat(consumerProperties.get("key.deserializer"))
                 .describedAs("key deserializer")
                 .isEqualTo(expectedKeyDeserializer);
-
-        assertThat(consumerProperties.get("value.deserializer"))
-                .describedAs("value deserializer")
-                .isEqualTo(expectedValueDeserializer);
-
-        assertThat(consumerProperties.get("value.subject.name.strategy"))
-                .describedAs("value subject name strategy")
-                .isEqualTo(expectedValueSubjectNameStrategy);
     }
 }
