@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023, Dariusz Szpakowski
+ * Copyright (c) 2023-2025, Dariusz Szpakowski
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -31,6 +31,7 @@
  */
 module tech.kage.event.kafka.streams {
     requires transitive tech.kage.event;
+    requires tech.kage.event.crypto;
 
     requires spring.boot.autoconfigure;
 

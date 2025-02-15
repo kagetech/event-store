@@ -39,6 +39,7 @@ module tech.kage.event.crypto {
 
     exports tech.kage.event.crypto
             to tech.kage.event.kafka.reactor,
+            tech.kage.event.kafka.streams,
             tech.kage.event.postgres,
             tech.kage.event.replicator,
             spring.beans,

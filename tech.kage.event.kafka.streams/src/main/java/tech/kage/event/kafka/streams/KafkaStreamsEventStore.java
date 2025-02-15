@@ -26,21 +26,19 @@
 package tech.kage.event.kafka.streams;
 
 import java.net.URI;
-import java.time.Instant;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.avro.specific.SpecificRecord;
 import org.apache.kafka.clients.producer.ProducerConfig;
-import org.apache.kafka.clients.producer.ProducerRecord;
-import org.apache.kafka.common.header.Header;
-import org.apache.kafka.common.header.internals.RecordHeader;
+import org.apache.kafka.common.serialization.ByteArraySerializer;
+import org.apache.kafka.common.serialization.Deserializer;
 import org.apache.kafka.common.serialization.Serdes;
+import org.apache.kafka.common.serialization.Serializer;
+import org.apache.kafka.common.serialization.UUIDSerializer;
 import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.kstream.Consumed;
@@ -48,11 +46,11 @@ import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.kstream.Named;
 import org.apache.kafka.streams.processor.api.ContextualFixedKeyProcessor;
 import org.apache.kafka.streams.processor.api.FixedKeyRecord;
-import org.apache.kafka.streams.processor.api.RecordMetadata;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
 import org.springframework.kafka.annotation.EnableKafkaStreams;
 import org.springframework.kafka.annotation.KafkaStreamsDefaultConfiguration;
 import org.springframework.kafka.config.KafkaStreamsConfiguration;
@@ -64,6 +62,7 @@ import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 import tech.kage.event.Event;
 import tech.kage.event.EventStore;
+import tech.kage.event.crypto.EventEncryptor;
 
 /**
  * A Kafka-based implementation of {@link EventStore} storing events in Kafka
@@ -89,11 +88,9 @@ import tech.kage.event.EventStore;
  */
 @Component
 public class KafkaStreamsEventStore implements EventStore {
-    private static final String METADATA_PARTITION = "partition";
-    private static final String METADATA_OFFSET = "offset";
-    private static final String METADATA_HEADER_PREFIX = "header.";
-
-    private final KafkaTemplate<UUID, Object> kafkaTemplate;
+    private final KafkaTemplate<UUID, byte[]> kafkaTemplate;
+    private final ProducerRecordEventTransformer producerRecordEventTransformer;
+    private final KafkaStreamsEventTransformer kafkaStreamsEventTransformer;
     private final StreamsBuilder streamsBuilder;
 
     private Map<String, KStream<UUID, Event<SpecificRecord>>> streams = new ConcurrentHashMap<>();
@@ -101,40 +98,45 @@ public class KafkaStreamsEventStore implements EventStore {
     /**
      * Constructs a new {@link KafkaStreamsEventStore} instance.
      *
-     * @param kafkaTemplate  an instance of {@link KafkaTemplate}
-     * @param streamsBuilder an instance of {@link StreamsBuilder}
+     * @param kafkaTemplate                  an instance of {@link KafkaTemplate}
+     * @param producerRecordEventTransformer an instance of
+     *                                       {@link ProducerRecordEventTransformer}
+     * @param kafkaStreamsEventTransformer   an instance of
+     *                                       {@link KafkaStreamsEventTransformer}
+     * @param streamsBuilder                 an instance of {@link StreamsBuilder}
      */
-    KafkaStreamsEventStore(KafkaTemplate<UUID, Object> kafkaTemplate, StreamsBuilder streamsBuilder) {
+    KafkaStreamsEventStore(
+            KafkaTemplate<UUID, byte[]> kafkaTemplate,
+            ProducerRecordEventTransformer producerRecordEventTransformer,
+            KafkaStreamsEventTransformer kafkaStreamsEventTransformer,
+            StreamsBuilder streamsBuilder) {
         this.kafkaTemplate = kafkaTemplate;
+        this.producerRecordEventTransformer = producerRecordEventTransformer;
+        this.kafkaStreamsEventTransformer = kafkaStreamsEventTransformer;
         this.streamsBuilder = streamsBuilder;
     }
 
     @Override
     public <T extends SpecificRecord> Mono<Event<T>> save(String topic, Event<T> event) {
-        Objects.requireNonNull(topic, "topic must not be null");
-        Objects.requireNonNull(event, "event must not be null");
-
-        return Mono
-                .fromFuture(
-                        kafkaTemplate.send(
-                                new ProducerRecord<>(
-                                        topic,
-                                        null,
-                                        event.timestamp().toEpochMilli(),
-                                        event.key(),
-                                        event.payload(),
-                                        event.metadata()
-                                                .entrySet()
-                                                .stream()
-                                                .map(e -> new RecordHeader(e.getKey(), (byte[]) e.getValue()))
-                                                .map(Header.class::cast)
-                                                .toList())))
-                .then(Mono.just(event));
+        return doSave(topic, event, null);
     }
 
     @Override
     public <T extends SpecificRecord> Mono<Event<T>> save(String topic, Event<T> event, URI encryptionKey) {
-        throw new UnsupportedOperationException("Unimplemented method 'save'");
+        Objects.requireNonNull(encryptionKey, "encryptionKey must not be null");
+
+        return doSave(topic, event, encryptionKey);
+    }
+
+    private <T extends SpecificRecord> Mono<Event<T>> doSave(String topic, Event<T> event, URI encryptionKey) {
+        Objects.requireNonNull(topic, "topic must not be null");
+        Objects.requireNonNull(event, "event must not be null");
+
+        return producerRecordEventTransformer
+                .transform(event, topic, encryptionKey)
+                .map(kafkaTemplate::send)
+                .flatMap(Mono::fromFuture)
+                .thenReturn(event);
     }
 
     /**
@@ -143,6 +145,8 @@ public class KafkaStreamsEventStore implements EventStore {
      * @param topic topic to subscribe to
      * 
      * @return {@link KStream} of events
+     * 
+     * @throws NullPointerException if the specified topic is null
      */
     public KStream<UUID, Event<SpecificRecord>> subscribe(String topic) {
         Objects.requireNonNull(topic, "topic must not be null");
@@ -150,62 +154,41 @@ public class KafkaStreamsEventStore implements EventStore {
         return streams.computeIfAbsent(
                 topic,
                 key -> streamsBuilder
-                        .stream(topic, Consumed.<UUID, SpecificRecord>as(topic + "-input"))
+                        .stream(topic, Consumed.<UUID, byte[]>as(topic + "-input").withValueSerde(Serdes.ByteArray()))
                         .processValues(EventTransformer::new, Named.as(topic + "-event_transformer")));
     }
 
     /**
      * Transformer of Kafka Streams Records into {@link Event} instances.
      */
-    static class EventTransformer extends ContextualFixedKeyProcessor<UUID, SpecificRecord, Event<SpecificRecord>> {
+    class EventTransformer extends ContextualFixedKeyProcessor<UUID, byte[], Event<SpecificRecord>> {
         @Override
-        public void process(FixedKeyRecord<UUID, SpecificRecord> message) {
+        public void process(FixedKeyRecord<UUID, byte[]> message) {
             context().forward(
                     message.withValue(
-                            Event.from(
-                                    message.key(),
-                                    message.value(),
-                                    timestamp(message),
-                                    metadata(message, context().recordMetadata()))));
-        }
-
-        private Instant timestamp(FixedKeyRecord<UUID, SpecificRecord> message) {
-            return Instant.ofEpochMilli(message.timestamp());
-        }
-
-        private Map<String, Object> metadata(FixedKeyRecord<?, ?> message, Optional<RecordMetadata> recordMetadata) {
-            var metadataMap = new HashMap<String, Object>();
-
-            if (recordMetadata.isPresent()) {
-                metadataMap.put(METADATA_PARTITION, recordMetadata.get().partition());
-                metadataMap.put(METADATA_OFFSET, recordMetadata.get().offset());
-            }
-
-            for (var header : message.headers()) {
-                metadataMap.put(METADATA_HEADER_PREFIX + header.key(), header.value());
-            }
-
-            return Collections.unmodifiableMap(metadataMap);
+                            kafkaStreamsEventTransformer.transform(message, context().recordMetadata())));
         }
     }
 
     @Configuration
     @EnableKafkaStreams
+    @Import({ ProducerRecordEventTransformer.class, KafkaStreamsEventTransformer.class, EventEncryptor.class })
     static class Config {
-        private static final String KEY_SERIALIZER_CLASS = "org.apache.kafka.common.serialization.UUIDSerializer";
-        private static final String VALUE_SERIALIZER_CLASS = "io.confluent.kafka.serializers.KafkaAvroSerializer";
-
         private static final String DEFAULT_VALUE_SERDE_CLASS = "io.confluent.kafka.streams.serdes.avro.SpecificAvroSerde";
         private static final String VALUE_SUBJECT_NAME_STRATEGY_CONFIG = "value.subject.name.strategy";
         private static final String VALUE_SUBJECT_NAME_STRATEGY = "io.confluent.kafka.serializers.subject.RecordNameStrategy";
+
+        private static final String SPECIFIC_AVRO_READER_CONFIG = "specific.avro.reader";
+
+        private static final String KAFKA_AVRO_SERIALIZER_CLASS = "io.confluent.kafka.serializers.KafkaAvroSerializer";
+        private static final String KAFKA_AVRO_DESERIALIZER_CLASS = "io.confluent.kafka.serializers.KafkaAvroDeserializer";
 
         @Bean
         ProducerFactory<?, ?> kafkaProducerFactory(KafkaProperties properties) {
             var props = properties.buildProducerProperties(null);
 
-            props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, KEY_SERIALIZER_CLASS);
-            props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, VALUE_SERIALIZER_CLASS);
-            props.putIfAbsent(VALUE_SUBJECT_NAME_STRATEGY_CONFIG, VALUE_SUBJECT_NAME_STRATEGY);
+            props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, UUIDSerializer.class.getName());
+            props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
 
             var factory = new DefaultKafkaProducerFactory<>(props);
 
@@ -232,6 +215,53 @@ public class KafkaStreamsEventStore implements EventStore {
             props.putIfAbsent(VALUE_SUBJECT_NAME_STRATEGY_CONFIG, VALUE_SUBJECT_NAME_STRATEGY);
 
             return new KafkaStreamsConfiguration(props);
+        }
+
+        @Bean
+        Serializer<SpecificRecord> kafkaAvroSerializer(KafkaProperties properties) {
+            var serializerConfig = new HashMap<>(properties.getProperties());
+
+            serializerConfig.putIfAbsent(VALUE_SUBJECT_NAME_STRATEGY_CONFIG, VALUE_SUBJECT_NAME_STRATEGY);
+
+            // Construct a new Kafka Avro Serializer instance via reflection because
+            // kafka-avro-serializer dependency is not compatible with module-info.java
+            // (split package).
+
+            @SuppressWarnings("unchecked")
+            var kafkaAvroSerializer = (Serializer<SpecificRecord>) getInstance(KAFKA_AVRO_SERIALIZER_CLASS);
+
+            kafkaAvroSerializer.configure(serializerConfig, false);
+
+            return kafkaAvroSerializer;
+        }
+
+        @Bean
+        Deserializer<SpecificRecord> kafkaAvroDeserializer(KafkaProperties properties) {
+            var deserializerConfig = new HashMap<>(properties.getProperties());
+
+            deserializerConfig.putIfAbsent(SPECIFIC_AVRO_READER_CONFIG, "true");
+            deserializerConfig.putIfAbsent(VALUE_SUBJECT_NAME_STRATEGY_CONFIG, VALUE_SUBJECT_NAME_STRATEGY);
+
+            // Construct a new Kafka Avro Deserializer instance via reflection because
+            // kafka-avro-serializer dependency is not compatible with module-info.java
+            // (split package).
+
+            @SuppressWarnings("unchecked")
+            var kafkaAvroDeserializer = (Deserializer<SpecificRecord>) getInstance(KAFKA_AVRO_DESERIALIZER_CLASS);
+
+            kafkaAvroDeserializer.configure(deserializerConfig, false);
+
+            return kafkaAvroDeserializer;
+        }
+
+        private Object getInstance(String className) {
+            try {
+                var ctor = Class.forName(className).getConstructor();
+
+                return ctor.newInstance();
+            } catch (Exception e) {
+                throw new IllegalArgumentException("Unable to instantiate " + className, e);
+            }
         }
     }
 }
