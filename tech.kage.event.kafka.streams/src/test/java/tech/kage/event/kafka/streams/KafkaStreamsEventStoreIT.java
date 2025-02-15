@@ -28,16 +28,21 @@ package tech.kage.event.kafka.streams;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.SequencedMap;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.stream.IntStream;
 
 import org.apache.avro.specific.SpecificRecord;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.header.Header;
+import org.apache.kafka.common.serialization.ByteArrayDeserializer;
+import org.apache.kafka.common.serialization.Deserializer;
+import org.apache.kafka.common.serialization.UUIDDeserializer;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -66,7 +71,6 @@ import org.testcontainers.utility.DockerImageName;
 import reactor.core.publisher.Flux;
 import reactor.kafka.receiver.KafkaReceiver;
 import reactor.kafka.receiver.ReceiverOptions;
-import reactor.kafka.receiver.ReceiverRecord;
 import reactor.test.StepVerifier;
 import tech.kage.event.Event;
 
@@ -85,7 +89,10 @@ class KafkaStreamsEventStoreIT {
     KafkaStreamsEventStore eventStore;
 
     @Autowired
-    ReceiverOptions<UUID, SpecificRecord> kafkaReceiverOptions;
+    ReceiverOptions<UUID, byte[]> kafkaReceiverOptions;
+
+    @Autowired
+    Deserializer<SpecificRecord> kafkaAvroDeserializer;
 
     static final String TEST_EVENTS = "test_events";
     static final String TEST_EVENTS_IN = "test_events_in";
@@ -117,7 +124,6 @@ class KafkaStreamsEventStoreIT {
         registry.add(
                 "spring.kafka.properties.schema.registry.url",
                 () -> "http://%s:%s".formatted(schemaRegistry.getHost(), schemaRegistry.getFirstMappedPort()));
-
     }
 
     @Component
@@ -140,18 +146,14 @@ class KafkaStreamsEventStoreIT {
     @Import({ KafkaStreamsEventStore.class, TestStreamsSubscriber.class })
     static class TestConfiguration {
         @Bean
-        ReceiverOptions<UUID, SpecificRecord> kafkaReceiverOptions(KafkaProperties properties) {
+        ReceiverOptions<UUID, byte[]> kafkaReceiverOptions(KafkaProperties properties) {
             var props = properties.buildConsumerProperties(null);
 
             props.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_committed");
             props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
             props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-            props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,
-                    "org.apache.kafka.common.serialization.UUIDDeserializer");
-            props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
-                    "io.confluent.kafka.serializers.KafkaAvroDeserializer");
-            props.put("specific.avro.reader", "true");
-            props.put("value.subject.name.strategy", "io.confluent.kafka.serializers.subject.RecordNameStrategy");
+            props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, UUIDDeserializer.class.getName());
+            props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
 
             return ReceiverOptions.create(props);
         }
@@ -169,19 +171,29 @@ class KafkaStreamsEventStoreIT {
         var savedEvents = Flux.concat(events.stream().map(event -> eventStore.save(TEST_EVENTS, event)).toList());
 
         // Then
-        var retrievedEvents = readEventsFromKafka(TEST_EVENTS)
+        var retrievedEvents = KafkaReceiver
+                .create(kafkaReceiverOptions.assignment(List.of(new TopicPartition(TEST_EVENTS, 0))))
+                .receive()
                 .take(events.size())
                 .timeout(Duration.ofSeconds(60));
 
         StepVerifier
                 .create(savedEvents.thenMany(retrievedEvents))
-                .thenConsumeWhile(nextEvent -> {
+                .thenConsumeWhile(message -> {
+                    var key = message.key();
+                    var payload = kafkaAvroDeserializer.deserialize(null, message.value());
+                    var timestamp = Instant.ofEpochMilli(message.timestamp());
+                    var metadata = toSequencedMap(message.headers());
+
                     var expectedEvent = expectedEventsIterator.next();
 
-                    return nextEvent.key().equals(expectedEvent.key())
-                            && nextEvent.payload().equals(expectedEvent.payload())
-                            && nextEvent.timestamp().equals(expectedEvent.timestamp())
-                            && isEqual(nextEvent.metadata(), expectedEvent.metadata());
+                    // the expected metadata are sorted by key
+                    var expectedMetadata = new TreeMap<>(expectedEvent.metadata());
+
+                    return key.equals(expectedEvent.key())
+                            && payload.equals(expectedEvent.payload())
+                            && timestamp.equals(expectedEvent.timestamp())
+                            && isEqualOrdered(metadata, expectedMetadata);
                 })
                 .as("retrieves stored events with the same data")
                 .verifyComplete();
@@ -218,42 +230,35 @@ class KafkaStreamsEventStoreIT {
         // topology specified in the bean init method
 
         // Then
-        var retrievedEvents = readEventsFromKafka(TEST_EVENTS_OUT)
+        var retrievedEvents = KafkaReceiver
+                .create(kafkaReceiverOptions.assignment(List.of(new TopicPartition(TEST_EVENTS_OUT, 0))))
+                .receive()
                 .take(events.size())
                 .timeout(Duration.ofSeconds(60));
 
         StepVerifier
                 .create(savedEvents.thenMany(retrievedEvents))
-                .thenConsumeWhile(nextEvent -> {
+                .thenConsumeWhile(message -> {
+                    var key = message.key();
+                    var payload = kafkaAvroDeserializer.deserialize(null, message.value());
+                    var timestamp = Instant.ofEpochMilli(message.timestamp());
+                    var metadata = toSequencedMap(message.headers());
+
                     var expectedEvent = expectedEventsIterator.next();
 
-                    return nextEvent.key().equals(expectedEvent.key())
-                            && nextEvent.payload().equals(expectedEvent.payload())
-                            && nextEvent.timestamp().equals(expectedEvent.timestamp())
-                            && isEqual(nextEvent.metadata(), expectedEvent.metadata());
+                    // the expected metadata are sorted by key
+                    var expectedMetadata = new TreeMap<>(expectedEvent.metadata());
+
+                    return key.equals(expectedEvent.key())
+                            && payload.equals(expectedEvent.payload())
+                            && timestamp.equals(expectedEvent.timestamp())
+                            && isEqualOrdered(metadata, expectedMetadata);
                 })
                 .as("retrieves stored events with the same data")
                 .verifyComplete();
     }
 
-    private Flux<Event<?>> readEventsFromKafka(String topic) {
-        return KafkaReceiver
-                .create(kafkaReceiverOptions.assignment(Collections.singleton(new TopicPartition(topic, 0))))
-                .receive()
-                .map(this::toEvent);
-    }
-
-    private Event<?> toEvent(ReceiverRecord<UUID, SpecificRecord> rec) {
-        var metadata = new HashMap<String, Object>();
-
-        for (var header : rec.headers()) {
-            metadata.put(header.key(), header.value());
-        }
-
-        return Event.from(rec.key(), rec.value(), Instant.ofEpochMilli(rec.timestamp()), metadata);
-    }
-
-    private List<Event<SpecificRecord>> testEvents(int count) {
+    protected List<Event<SpecificRecord>> testEvents(int count) {
         return IntStream
                 .rangeClosed(1, count)
                 .boxed()
@@ -267,28 +272,49 @@ class KafkaStreamsEventStoreIT {
                 TestPayload.newBuilder().setText("test payload " + offset).build(),
                 Instant.now(),
                 Map.of(
-                        "meta1", "meta1_value".getBytes(),
-                        "meta2", UUID.randomUUID().toString().getBytes(),
-                        "meta3", Long.toString(offset).getBytes()));
+                        "dTest", "meta_value".getBytes(),
+                        "zTest", UUID.randomUUID().toString().getBytes(),
+                        "bTest", Long.toString(offset).getBytes()));
     }
 
-    private boolean isEqual(Map<String, Object> actual, Map<String, Object> expected) {
+    protected SequencedMap<String, Object> toSequencedMap(Iterable<Header> headers) {
+        var associatedMetadata = new LinkedHashMap<String, Object>();
+
+        for (var header : headers) {
+            associatedMetadata.put(header.key(), header.value());
+        }
+
+        return associatedMetadata;
+    }
+
+    protected boolean isEqualOrdered(Map<String, Object> actual, Map<String, Object> expected) {
         if (actual.size() != expected.size()) {
             return false;
         }
 
-        return actual
-                .entrySet()
-                .stream()
-                .allMatch(e -> {
-                    var actualValue = e.getValue();
-                    var expectedValue = expected.get(e.getKey());
+        var actualKeys = actual.keySet().iterator();
+        var expectedKeys = expected.keySet().iterator();
 
-                    if (actualValue instanceof byte[] actualBytes && expectedValue instanceof byte[] expectedBytes) {
-                        return Arrays.equals(actualBytes, expectedBytes);
-                    } else {
-                        return actualValue.equals(expectedValue);
-                    }
-                });
+        while (actualKeys.hasNext()) {
+            var nextActualKey = actualKeys.next();
+            var nextExpectedKey = expectedKeys.next();
+
+            var nextActualValue = actual.get(nextActualKey);
+            var nextExpectedValue = expected.get(nextExpectedKey);
+
+            if (!nextActualKey.equals(nextExpectedKey)) {
+                return false;
+            }
+
+            if (nextActualValue instanceof byte[] actualBytes && nextExpectedValue instanceof byte[] expectedBytes) {
+                if (!Arrays.equals(actualBytes, expectedBytes)) {
+                    return false;
+                }
+            } else if (!nextActualValue.equals(nextExpectedValue)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

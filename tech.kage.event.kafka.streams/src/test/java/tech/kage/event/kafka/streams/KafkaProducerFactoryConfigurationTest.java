@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023, Dariusz Szpakowski
+ * Copyright (c) 2023-2025, Dariusz Szpakowski
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -50,8 +50,7 @@ class KafkaProducerFactoryConfigurationTest {
     void createsKafkaProducerFactoryConfig(KafkaProperties kafkaProperties) {
         // Given
         var expectedKeySerializer = "org.apache.kafka.common.serialization.UUIDSerializer";
-        var expectedValueSerializer = "io.confluent.kafka.serializers.KafkaAvroSerializer";
-        var expectedValueSubjectNameStrategy = "io.confluent.kafka.serializers.subject.RecordNameStrategy";
+        var expectedValueSerializer = "org.apache.kafka.common.serialization.ByteArraySerializer";
         var expectedTransactionIdPrefix = kafkaProperties.getProducer().getTransactionIdPrefix();
 
         // When
@@ -67,10 +66,6 @@ class KafkaProducerFactoryConfigurationTest {
         assertThat(configurationProperties.get("value.serializer"))
                 .describedAs("value serializer")
                 .isEqualTo(expectedValueSerializer);
-
-        assertThat(configurationProperties.get("value.subject.name.strategy"))
-                .describedAs("value subject name strategy")
-                .isEqualTo(expectedValueSubjectNameStrategy);
 
         assertThat(kafkaProducerFactoryConfig.getTransactionIdPrefix())
                 .describedAs("transaction id prefix")
