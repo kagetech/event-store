@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023-2024, Dariusz Szpakowski
+ * Copyright (c) 2023-2025, Dariusz Szpakowski
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -37,7 +37,8 @@ import org.apache.avro.specific.SpecificRecord;
 /**
  * A record that represents an immutable event.
  * 
- * @param <T>       the type of payload
+ * @param <K>       the type of key
+ * @param <V>       the type of payload
  * @param key       the {@code Event}'s key
  * @param payload   the {@code Event}'s payload
  * @param timestamp the {@code Event}'s timestamp
@@ -45,7 +46,7 @@ import org.apache.avro.specific.SpecificRecord;
  *
  * @author Dariusz Szpakowski
  */
-public record Event<T extends SpecificRecord>(UUID key, T payload, Instant timestamp, Map<String, Object> metadata) {
+public record Event<K, V extends SpecificRecord>(K key, V payload, Instant timestamp, Map<String, Object> metadata) {
     /**
      * Creates an {@link Event} with a given key, payload and timestamp.
      *
@@ -57,7 +58,7 @@ public record Event<T extends SpecificRecord>(UUID key, T payload, Instant times
      * @throws NullPointerException if the specified key, payload, timestamp or
      *                              metadata is null
      */
-    public Event(UUID key, T payload, Instant timestamp, Map<String, Object> metadata) {
+    public Event(K key, V payload, Instant timestamp, Map<String, Object> metadata) {
         Objects.requireNonNull(key, "key must not be null");
         Objects.requireNonNull(payload, "payload must not be null");
         Objects.requireNonNull(timestamp, "timestamp must not be null");
@@ -72,7 +73,7 @@ public record Event<T extends SpecificRecord>(UUID key, T payload, Instant times
     /**
      * Creates an {@link Event} with a given payload.
      *
-     * @param <T>     the {@code Event}'s payload type
+     * @param <V>     the {@code Event}'s payload type
      * @param payload the {@code Event}'s payload
      *
      * @return an {@link Event} with the specified payload, a random key, timestamp
@@ -81,14 +82,15 @@ public record Event<T extends SpecificRecord>(UUID key, T payload, Instant times
      * 
      * @throws NullPointerException if the specified payload is null
      */
-    public static <T extends SpecificRecord> Event<T> from(T payload) {
+    public static <V extends SpecificRecord> Event<UUID, V> from(V payload) {
         return from(UUID.randomUUID(), payload);
     }
 
     /**
      * Creates an {@link Event} with a given key and payload.
      *
-     * @param <T>     the {@code Event}'s payload type
+     * @param <K>     the {@code Event}'s key type
+     * @param <V>     the {@code Event}'s payload type
      * @param key     the {@code Event}'s key
      * @param payload the {@code Event}'s payload
      *
@@ -97,14 +99,15 @@ public record Event<T extends SpecificRecord>(UUID key, T payload, Instant times
      * 
      * @throws NullPointerException if the specified key or payload is null
      */
-    public static <T extends SpecificRecord> Event<T> from(UUID key, T payload) {
+    public static <K, V extends SpecificRecord> Event<K, V> from(K key, V payload) {
         return from(key, payload, Instant.now());
     }
 
     /**
      * Creates an {@link Event} with a given key, payload and timestamp.
      *
-     * @param <T>       the {@code Event}'s payload type
+     * @param <K>       the {@code Event}'s key type
+     * @param <V>       the {@code Event}'s payload type
      * @param key       the {@code Event}'s key
      * @param payload   the {@code Event}'s payload
      * @param timestamp the {@code Event}'s timestamp
@@ -115,14 +118,15 @@ public record Event<T extends SpecificRecord>(UUID key, T payload, Instant times
      * @throws NullPointerException if the specified key, payload or timestamp is
      *                              null
      */
-    public static <T extends SpecificRecord> Event<T> from(UUID key, T payload, Instant timestamp) {
+    public static <K, V extends SpecificRecord> Event<K, V> from(K key, V payload, Instant timestamp) {
         return new Event<>(key, payload, timestamp, Map.of());
     }
 
     /**
      * Creates an {@link Event} with a given key, payload, timestamp and metadata.
      *
-     * @param <T>       the {@code Event}'s payload type
+     * @param <K>       the {@code Event}'s key type
+     * @param <V>       the {@code Event}'s payload type
      * @param key       the {@code Event}'s key
      * @param payload   the {@code Event}'s payload
      * @param timestamp the {@code Event}'s timestamp
@@ -134,9 +138,9 @@ public record Event<T extends SpecificRecord>(UUID key, T payload, Instant times
      * @throws NullPointerException if the specified key, payload, timestamp or
      *                              metadata is null
      */
-    public static <T extends SpecificRecord> Event<T> from(
-            UUID key,
-            T payload,
+    public static <K, V extends SpecificRecord> Event<K, V> from(
+            K key,
+            V payload,
             Instant timestamp,
             Map<String, Object> metadata) {
         return new Event<>(key, payload, timestamp, metadata);

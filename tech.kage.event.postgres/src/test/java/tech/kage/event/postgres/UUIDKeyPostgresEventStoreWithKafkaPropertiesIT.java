@@ -32,58 +32,16 @@ import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.containers.Network;
-import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.containers.wait.strategy.Wait;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.kafka.KafkaContainer;
-import org.testcontainers.utility.DockerImageName;
 
 /**
  * Integration tests for {@link PostgresEventStore} configured with
- * {@link KafkaProperties}.
+ * {@link KafkaProperties} where events have keys of {@code UUID} type.
  * 
  * @author Dariusz Szpakowski
  */
-@Testcontainers
-class PostgresEventStoreWithKafkaPropertiesIT extends AbstractPostgresEventStoreIT {
-    static final Network network = Network.newNetwork();
-
-    @Container
-    @ServiceConnection
-    static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:15-alpine");
-
-    @SuppressWarnings("resource")
-    @Container
-    static final KafkaContainer kafka = new KafkaContainer("apache/kafka-native:3.8.1").withNetwork(network);
-
-    @SuppressWarnings("resource")
-    @Container
-    static final GenericContainer<?> schemaRegistry = new GenericContainer<>(
-            DockerImageName.parse("confluentinc/cp-schema-registry:7.8.0"))
-            .dependsOn(kafka)
-            .withNetwork(network)
-            .withExposedPorts(8081)
-            .withEnv("SCHEMA_REGISTRY_HOST_NAME", "schema-registry")
-            .withEnv("SCHEMA_REGISTRY_LISTENERS", "http://0.0.0.0:8081")
-            .withEnv("SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS",
-                    "PLAINTEXT://%s:9092".formatted(kafka.getNetworkAliases().get(0)))
-            .waitingFor(Wait.forHttp("/subjects").forStatusCode(200));
-
-    @DynamicPropertySource
-    static void overrideProperties(DynamicPropertyRegistry registry) {
-        registry.add(
-                "schema.registry.url",
-                () -> "http://%s:%s".formatted(schemaRegistry.getHost(), schemaRegistry.getFirstMappedPort()));
-    }
-
-    static class TestConfiguration extends AbstractPostgresEventStoreIT.TestConfiguration {
+class UUIDKeyPostgresEventStoreWithKafkaPropertiesIT extends UUIDKeyPostgresEventStoreIT {
+    static class TestConfiguration extends PostgresEventStoreIT.TestConfiguration {
         @Bean
         KafkaProperties kafkaProperties(@Value("${schema.registry.url}") String schemaRegistryUrl) {
             var kafkaProperties = mock(KafkaProperties.class);

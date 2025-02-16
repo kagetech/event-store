@@ -31,6 +31,8 @@ import static org.junit.jupiter.params.provider.Arguments.arguments;
 
 import java.util.stream.Stream;
 
+import org.apache.kafka.common.serialization.ByteArraySerializer;
+import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -49,8 +51,8 @@ class KafkaProducerFactoryConfigurationTest {
     @MethodSource("testKafkaProperties")
     void createsKafkaProducerFactoryConfig(KafkaProperties kafkaProperties) {
         // Given
-        var expectedKeySerializer = "org.apache.kafka.common.serialization.UUIDSerializer";
-        var expectedValueSerializer = "org.apache.kafka.common.serialization.ByteArraySerializer";
+        var expectedKeySerializer = StringSerializer.class;
+        var expectedValueSerializer = ByteArraySerializer.class;
         var expectedTransactionIdPrefix = kafkaProperties.getProducer().getTransactionIdPrefix();
 
         // When

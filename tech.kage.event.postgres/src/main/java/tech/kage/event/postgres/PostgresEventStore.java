@@ -57,16 +57,19 @@ import tech.kage.event.crypto.MetadataSerializer;
  * <p>
  * Can be configured in two ways:
  * 
- * <ul>
+ * <ol>
  * <li>{@code schema.registry.url} configuration property that points to a
  * Confluent Schema Registry instance</li>
  * <li>{@link KafkaProperties} bean for setting any configuration property</li>
- * </ul>
+ * </ol>
+ * 
+ * @param <K> the type of stored events' keys
+ * @param <V> the type of stored events' payloads
  * 
  * @author Dariusz Szpakowski
  */
 @Component
-public class PostgresEventStore implements EventStore {
+public class PostgresEventStore<K, V extends SpecificRecord> implements EventStore<K, V> {
     private static final String INSERT_EVENT_SQL = """
                 INSERT INTO events.%s (key, data, timestamp)
                 VALUES (:key, :data, :timestamp)
@@ -97,18 +100,18 @@ public class PostgresEventStore implements EventStore {
     }
 
     @Override
-    public <T extends SpecificRecord> Mono<Event<T>> save(String topic, Event<T> event) {
+    public Mono<Event<K, V>> save(String topic, Event<K, V> event) {
         return doSave(topic, event, null);
     }
 
     @Override
-    public <T extends SpecificRecord> Mono<Event<T>> save(String topic, Event<T> event, URI encryptionKey) {
+    public Mono<Event<K, V>> save(String topic, Event<K, V> event, URI encryptionKey) {
         Objects.requireNonNull(encryptionKey, "encryptionKey must not be null");
 
         return doSave(topic, event, encryptionKey);
     }
 
-    private <T extends SpecificRecord> Mono<Event<T>> doSave(String topic, Event<T> event, URI encryptionKey) {
+    private Mono<Event<K, V>> doSave(String topic, Event<K, V> event, URI encryptionKey) {
         Objects.requireNonNull(topic, "topic must not be null");
         Objects.requireNonNull(event, "event must not be null");
 

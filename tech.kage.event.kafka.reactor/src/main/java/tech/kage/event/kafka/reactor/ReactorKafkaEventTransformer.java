@@ -38,7 +38,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.SequencedMap;
-import java.util.UUID;
 
 import org.apache.avro.specific.SpecificRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -81,13 +80,11 @@ class ReactorKafkaEventTransformer {
      * @param kafkaAvroSerializer   an instance of {@link Serializer}
      * @param kafkaAvroDeserializer an instance of {@link Deserializer}
      * @param eventEncryptor        an instance of {@link EventEncryptor}
-     * 
-     * @throws GeneralSecurityException if encryption support initialization fails
      */
     ReactorKafkaEventTransformer(
             Serializer<SpecificRecord> kafkaAvroSerializer,
             Deserializer<SpecificRecord> kafkaAvroDeserializer,
-            EventEncryptor eventEncryptor) throws GeneralSecurityException {
+            EventEncryptor eventEncryptor) {
         this.kafkaAvroSerializer = kafkaAvroSerializer;
         this.kafkaAvroDeserializer = kafkaAvroDeserializer;
         this.eventEncryptor = eventEncryptor;
@@ -103,7 +100,7 @@ class ReactorKafkaEventTransformer {
      * 
      * @return a {@link SenderRecord} created from the given {@link Event}
      */
-    Mono<SenderRecord<UUID, byte[], Object>> transform(Event<?> event, String topic, URI encryptionKey) {
+    Mono<SenderRecord<Object, byte[], Object>> transform(Event<?, ?> event, String topic, URI encryptionKey) {
         return Mono
                 .fromCallable(() -> kafkaAvroSerializer.serialize(topic, event.payload()))
                 .subscribeOn(Schedulers.boundedElastic())
@@ -111,7 +108,7 @@ class ReactorKafkaEventTransformer {
                         ? eventEncryptor.encrypt(
                                 serialized, event.key(), event.timestamp(), event.metadata(), encryptionKey)
                         : Mono.just(serialized))
-                .map(serialized -> new ProducerRecord<>(
+                .map(serialized -> new ProducerRecord<Object, byte[]>(
                         topic,
                         null,
                         event.timestamp().toEpochMilli(),
@@ -131,7 +128,7 @@ class ReactorKafkaEventTransformer {
      * 
      * @throws SerializationException if event payload decryption fails
      */
-    Event<SpecificRecord> transform(ReceiverRecord<UUID, byte[]> message) {
+    <K> Event<K, SpecificRecord> transform(ReceiverRecord<K, byte[]> message) {
         var key = message.key();
         var encryptedPayload = message.value();
         var timestamp = Instant.ofEpochMilli(message.timestamp());
@@ -182,7 +179,7 @@ class ReactorKafkaEventTransformer {
         return associatedMetadata;
     }
 
-    private Map<String, Object> metadata(ReceiverRecord<UUID, byte[]> message) {
+    private Map<String, Object> metadata(ReceiverRecord<?, byte[]> message) {
         var metadataMap = new HashMap<String, Object>();
 
         metadataMap.put(METADATA_PARTITION, message.partition());

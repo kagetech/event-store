@@ -146,7 +146,7 @@ class ReactorKafkaEventTransformerIT {
 
     @ParameterizedTest
     @MethodSource("testEvents")
-    void transformsEventIntoSenderRecord(Event<?> event, SenderRecord<UUID, byte[], Object> expectedRecord) {
+    void transformsEventIntoSenderRecord(Event<?, ?> event, SenderRecord<Object, byte[], Object> expectedRecord) {
         // When
         var transformedRecord = eventTransformer.transform(event, TEST_EVENTS, null).block();
 
@@ -170,8 +170,8 @@ class ReactorKafkaEventTransformerIT {
 
     @ParameterizedTest
     @MethodSource("testEvents")
-    void encryptsAndTransformsEventIntoSenderRecord(Event<?> event, SenderRecord<UUID, byte[], Object> expectedRecord)
-            throws GeneralSecurityException {
+    void encryptsAndTransformsEventIntoSenderRecord(Event<?, ?> event,
+            SenderRecord<Object, byte[], Object> expectedRecord) throws GeneralSecurityException {
         // Given
         var encryptionKey = URI.create("test-kms://test-keys/" + event.key().toString());
 
@@ -221,7 +221,7 @@ class ReactorKafkaEventTransformerIT {
 
     @ParameterizedTest
     @MethodSource("testMessages")
-    void transformsMessageIntoEvent(ReceiverRecord<UUID, byte[]> receiverRecord, Event<?> expectedEvent) {
+    void transformsMessageIntoEvent(ReceiverRecord<Object, byte[]> receiverRecord, Event<?, ?> expectedEvent) {
         // When
         var transformedEvent = eventTransformer.transform(receiverRecord);
 
@@ -245,7 +245,7 @@ class ReactorKafkaEventTransformerIT {
 
     @ParameterizedTest
     @MethodSource("testEncryptedMessages")
-    void decryptsAndTransformsMessageIntoEvent(ReceiverRecord<UUID, byte[]> receiverRecord, Event<?> expectedEvent)
+    void decryptsAndTransformsMessageIntoEvent(ReceiverRecord<Object, byte[]> receiverRecord, Event<?, ?> expectedEvent)
             throws GeneralSecurityException {
         // Given
         var encryptionKey = URI.create(new String(receiverRecord.headers().lastHeader(ENCRYPTION_KEY_ID).value()));
@@ -277,8 +277,8 @@ class ReactorKafkaEventTransformerIT {
 
     @ParameterizedTest
     @MethodSource("testEncryptedMessages")
-    void throwsExceptionWhenInvalidEncryptionKey(ReceiverRecord<UUID, byte[]> receiverRecord, Event<?> expectedEvent)
-            throws GeneralSecurityException {
+    void throwsExceptionWhenInvalidEncryptionKey(ReceiverRecord<Object, byte[]> receiverRecord,
+            Event<?, ?> expectedEvent) throws GeneralSecurityException {
         // Given
         var encryptionKey = URI.create(new String(receiverRecord.headers().lastHeader(ENCRYPTION_KEY_ID).value()));
         var invalidEncryptionKey = URI.create("test-kms://test-keys/invalid");
@@ -301,8 +301,8 @@ class ReactorKafkaEventTransformerIT {
 
     @ParameterizedTest
     @MethodSource("testEncryptedMessages")
-    void throwsExceptionWhenEventPayloadIntegrityIsViolated(ReceiverRecord<UUID, byte[]> receiverRecord,
-            Event<?> expectedEvent) throws GeneralSecurityException {
+    void throwsExceptionWhenEventPayloadIntegrityIsViolated(ReceiverRecord<Object, byte[]> receiverRecord,
+            Event<?, ?> expectedEvent) throws GeneralSecurityException {
         // Given
         var invalidKey = UUID.randomUUID(); // use invalid key
 
@@ -336,14 +336,14 @@ class ReactorKafkaEventTransformerIT {
         return Stream.of(
                 arguments(
                         named(
-                                "event without headers",
+                                "event without headers with UUID key",
                                 Event.from(
                                         UUID.fromString("bb15137d-8f16-4a19-a023-6845b9d1bead"),
                                         TestPayload.newBuilder().setText("test payload 1").build(),
                                         Instant.ofEpochMilli(1734149827923l),
                                         Map.of())),
                         named(
-                                "senderRecord without headers",
+                                "senderRecord without headers with UUID key",
                                 senderRecord(
                                         UUID.fromString("bb15137d-8f16-4a19-a023-6845b9d1bead"),
                                         serialize(TestPayload.newBuilder().setText("test payload 1").build()),
@@ -351,9 +351,9 @@ class ReactorKafkaEventTransformerIT {
                                         List.of()))),
                 arguments(
                         named(
-                                "event with headers",
+                                "event with headers with String key",
                                 Event.from(
-                                        UUID.fromString("23debd32-09cd-4a20-a403-c18793ecd2d2"),
+                                        "test-event-2",
                                         TestPayload.newBuilder().setText("test payload 2").build(),
                                         Instant.ofEpochMilli(1734174935363l),
                                         Map.of(
@@ -364,9 +364,9 @@ class ReactorKafkaEventTransformerIT {
                                                         .getBytes(),
                                                 "bTest", "1".getBytes()))),
                         named(
-                                "senderRecord with headers",
+                                "senderRecord with headers with String key",
                                 senderRecord(
-                                        UUID.fromString("23debd32-09cd-4a20-a403-c18793ecd2d2"),
+                                        "test-event-2",
                                         serialize(TestPayload.newBuilder().setText("test payload 2").build()),
                                         1734174935363l,
                                         List.of(
@@ -382,7 +382,7 @@ class ReactorKafkaEventTransformerIT {
         return Stream.of(
                 arguments(
                         named(
-                                "message without headers",
+                                "message without headers with UUID key",
                                 receiverRecord(
                                         UUID.fromString("bb15137d-8f16-4a19-a023-6845b9d1bead"),
                                         serialize(TestPayload.newBuilder().setText("test payload 1").build()),
@@ -391,7 +391,7 @@ class ReactorKafkaEventTransformerIT {
                                         5,
                                         List.of())),
                         named(
-                                "event without headers",
+                                "event without headers with UUID key",
                                 Event.from(
                                         UUID.fromString("bb15137d-8f16-4a19-a023-6845b9d1bead"),
                                         TestPayload.newBuilder().setText("test payload 1").build(),
@@ -399,18 +399,18 @@ class ReactorKafkaEventTransformerIT {
                                         Map.of("partition", 1, "offset", 5l)))),
                 arguments(
                         named(
-                                "message with headers",
+                                "message with headers with String key",
                                 receiverRecord(
-                                        UUID.fromString("23debd32-09cd-4a20-a403-c18793ecd2d2"),
+                                        "test-event-2",
                                         serialize(TestPayload.newBuilder().setText("test payload 2").build()),
                                         1734174935363l,
                                         2,
                                         8,
                                         List.of(new RecordHeader(SOURCE_ID, "15".getBytes())))),
                         named(
-                                "event with headers",
+                                "event with headers with String key",
                                 Event.from(
-                                        UUID.fromString("23debd32-09cd-4a20-a403-c18793ecd2d2"),
+                                        "test-event-2",
                                         TestPayload.newBuilder().setText("test payload 2").build(),
                                         Instant.ofEpochMilli(1734174935363l),
                                         Map.of(
@@ -477,18 +477,18 @@ class ReactorKafkaEventTransformerIT {
                                                         .getBytes())))));
     }
 
-    private static SenderRecord<UUID, byte[], Object> senderRecord(UUID key, byte[] payload, long timestamp,
+    private static SenderRecord<Object, byte[], Object> senderRecord(Object key, byte[] payload, long timestamp,
             List<Header> headers) {
         return SenderRecord.create(new ProducerRecord<>(TEST_EVENTS, null, timestamp, key, payload, headers), null);
     }
 
-    private static ReceiverRecord<UUID, byte[]> receiverRecord(UUID key, byte[] payload, long timestamp, int partition,
-            long offset, List<Header> headers) {
+    private static ReceiverRecord<Object, byte[]> receiverRecord(Object key, byte[] payload, long timestamp,
+            int partition, long offset, List<Header> headers) {
         return receiverRecord(key, payload, timestamp, partition, offset, new RecordHeaders(headers));
     }
 
-    private static ReceiverRecord<UUID, byte[]> receiverRecord(UUID key, byte[] payload, long timestamp, int partition,
-            long offset, Headers headers) {
+    private static ReceiverRecord<Object, byte[]> receiverRecord(Object key, byte[] payload, long timestamp,
+            int partition, long offset, Headers headers) {
         return new ReceiverRecord<>(
                 new ConsumerRecord<>(
                         "test_events",
@@ -517,7 +517,7 @@ class ReactorKafkaEventTransformerIT {
         }
     }
 
-    private ReceiverRecord<UUID, byte[]> encrypt(ReceiverRecord<UUID, byte[]> receiverRecord, URI encryptionKey) {
+    private ReceiverRecord<Object, byte[]> encrypt(ReceiverRecord<Object, byte[]> receiverRecord, URI encryptionKey) {
         var metadata = new HashMap<String, Object>();
 
         for (var header : receiverRecord.headers()) {

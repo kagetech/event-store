@@ -83,16 +83,16 @@ import tech.kage.event.Event;
 @SpringBootTest
 @ActiveProfiles("test")
 @Testcontainers
-class ReactorKafkaEventStoreIT {
+abstract class ReactorKafkaEventStoreIT<K> {
     // UUT
     @Autowired
-    ReactorKafkaEventStore eventStore;
+    ReactorKafkaEventStore<K, SpecificRecord> eventStore;
 
     @Autowired
     DatabaseClient databaseClient;
 
     @Autowired
-    ReceiverOptions<UUID, byte[]> kafkaReceiverOptions;
+    ReceiverOptions<Object, byte[]> kafkaReceiverOptions;
 
     @Autowired
     Deserializer<SpecificRecord> kafkaAvroDeserializer;
@@ -318,7 +318,7 @@ class ReactorKafkaEventStoreIT {
                 .verifyComplete();
     }
 
-    protected List<Event<SpecificRecord>> testEvents(int count) {
+    protected List<Event<K, SpecificRecord>> testEvents(int count) {
         return IntStream
                 .rangeClosed(1, count)
                 .boxed()
@@ -326,9 +326,9 @@ class ReactorKafkaEventStoreIT {
                 .toList();
     }
 
-    private Event<SpecificRecord> testEvent(int offset) {
+    private Event<K, SpecificRecord> testEvent(int offset) {
         return Event.from(
-                UUID.randomUUID(),
+                getTestEventKey(offset),
                 TestPayload.newBuilder().setText("test payload " + offset).build(),
                 Instant.now(),
                 Map.of(
@@ -397,4 +397,6 @@ class ReactorKafkaEventStoreIT {
 
         return true;
     }
+
+    protected abstract K getTestEventKey(int id);
 }

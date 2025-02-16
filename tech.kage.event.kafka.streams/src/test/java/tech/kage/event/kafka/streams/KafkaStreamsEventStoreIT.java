@@ -42,7 +42,6 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.Deserializer;
-import org.apache.kafka.common.serialization.UUIDDeserializer;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -83,13 +82,13 @@ import tech.kage.event.Event;
 @ActiveProfiles("test")
 @Testcontainers
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-class KafkaStreamsEventStoreIT {
+abstract class KafkaStreamsEventStoreIT<K> {
     // UUT
     @Autowired
-    KafkaStreamsEventStore eventStore;
+    KafkaStreamsEventStore<K, SpecificRecord> eventStore;
 
     @Autowired
-    ReceiverOptions<UUID, byte[]> kafkaReceiverOptions;
+    ReceiverOptions<Object, byte[]> kafkaReceiverOptions;
 
     @Autowired
     Deserializer<SpecificRecord> kafkaAvroDeserializer;
@@ -129,7 +128,7 @@ class KafkaStreamsEventStoreIT {
     @Component
     static class TestStreamsSubscriber {
         @Autowired
-        void init(KafkaAdmin kafkaAdmin, KafkaStreamsEventStore eventStore) {
+        void init(KafkaAdmin kafkaAdmin, KafkaStreamsEventStore<Object, SpecificRecord> eventStore) {
             kafkaAdmin.createOrModifyTopics(TopicBuilder.name(TEST_EVENTS).build());
             kafkaAdmin.createOrModifyTopics(TopicBuilder.name(TEST_EVENTS_IN).build());
             kafkaAdmin.createOrModifyTopics(TopicBuilder.name(TEST_EVENTS_OUT).build());
@@ -146,13 +145,12 @@ class KafkaStreamsEventStoreIT {
     @Import({ KafkaStreamsEventStore.class, TestStreamsSubscriber.class })
     static class TestConfiguration {
         @Bean
-        ReceiverOptions<UUID, byte[]> kafkaReceiverOptions(KafkaProperties properties) {
+        ReceiverOptions<Object, byte[]> kafkaReceiverOptions(KafkaProperties properties) {
             var props = properties.buildConsumerProperties(null);
 
             props.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_committed");
             props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
             props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-            props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, UUIDDeserializer.class.getName());
             props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
 
             return ReceiverOptions.create(props);
@@ -258,7 +256,7 @@ class KafkaStreamsEventStoreIT {
                 .verifyComplete();
     }
 
-    protected List<Event<SpecificRecord>> testEvents(int count) {
+    protected List<Event<K, SpecificRecord>> testEvents(int count) {
         return IntStream
                 .rangeClosed(1, count)
                 .boxed()
@@ -266,9 +264,9 @@ class KafkaStreamsEventStoreIT {
                 .toList();
     }
 
-    private Event<SpecificRecord> testEvent(int offset) {
+    private Event<K, SpecificRecord> testEvent(int offset) {
         return Event.from(
-                UUID.randomUUID(),
+                getTestEventKey(offset),
                 TestPayload.newBuilder().setText("test payload " + offset).build(),
                 Instant.now(),
                 Map.of(
@@ -317,4 +315,6 @@ class KafkaStreamsEventStoreIT {
 
         return true;
     }
+
+    protected abstract K getTestEventKey(int id);
 }

@@ -30,12 +30,12 @@ import static tech.kage.event.EventStore.SOURCE_ID;
 
 import java.net.URI;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
-import java.util.UUID;
 
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
@@ -83,7 +83,7 @@ public class EventEncryptor {
      * @throws NullPointerException if the specified payload, key, timestamp,
      *                              metadata or encryptionKey is null
      */
-    public Mono<byte[]> encrypt(byte[] payload, UUID key, Instant timestamp, Map<String, Object> metadata,
+    public Mono<byte[]> encrypt(byte[] payload, Object key, Instant timestamp, Map<String, Object> metadata,
             URI encryptionKey) {
         Objects.requireNonNull(payload, "payload must not be null");
         Objects.requireNonNull(key, "key must not be null");
@@ -113,7 +113,7 @@ public class EventEncryptor {
      * @throws NullPointerException     if the specified payload, key, timestamp or
      *                                  metadata is null
      */
-    public byte[] decrypt(byte[] payload, UUID key, Instant timestamp, Map<String, Object> metadata)
+    public byte[] decrypt(byte[] payload, Object key, Instant timestamp, Map<String, Object> metadata)
             throws GeneralSecurityException {
         Objects.requireNonNull(payload, "payload must not be null");
         Objects.requireNonNull(key, "key must not be null");
@@ -137,17 +137,18 @@ public class EventEncryptor {
                 .decrypt(payload, prepareAssociatedData(key, timestamp, associatedMetadata));
     }
 
-    private byte[] prepareAssociatedData(UUID key, Instant timestamp, Map<String, Object> metadata) {
+    private byte[] prepareAssociatedData(Object key, Instant timestamp, Map<String, Object> metadata) {
         var serializedMetadata = metadata.isEmpty() ? new byte[0] : MetadataSerializer.serialize(metadata);
 
         return prepareAssociatedData(key, timestamp, serializedMetadata);
     }
 
-    byte[] prepareAssociatedData(UUID key, Instant timestamp, byte[] metadata) {
+    byte[] prepareAssociatedData(Object key, Instant timestamp, byte[] metadata) {
+        var keyBytes = key.toString().getBytes(StandardCharsets.UTF_8);
+
         return ByteBuffer
-                .allocate(3 * Long.BYTES + metadata.length) // 2 longs for key UUID and 1 long for timestamp
-                .putLong(key.getMostSignificantBits())
-                .putLong(key.getLeastSignificantBits())
+                .allocate(keyBytes.length + Long.BYTES + metadata.length) // 1 long for timestamp
+                .put(keyBytes)
                 .putLong(timestamp.toEpochMilli())
                 .put(metadata)
                 .array();

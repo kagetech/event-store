@@ -65,7 +65,7 @@ import tech.kage.event.crypto.EventEncryptor;
  * 
  * @author Dariusz Szpakowski
  */
-class EncryptedReactorKafkaEventStoreIT extends ReactorKafkaEventStoreIT {
+class EncryptedReactorKafkaEventStoreIT extends UUIDKeyReactorKafkaEventStoreIT {
     @Autowired
     EventEncryptor eventEncryptor;
 
@@ -84,7 +84,7 @@ class EncryptedReactorKafkaEventStoreIT extends ReactorKafkaEventStoreIT {
         // Given
         var events = testEvents(10);
 
-        var keyMap = new HashMap<UUID, URI>();
+        var keyMap = new HashMap<Object, URI>();
 
         for (var event : events) {
             var encryptionKey = URI.create("test-kms://test-keys/" + event.key().toString());
@@ -146,7 +146,7 @@ class EncryptedReactorKafkaEventStoreIT extends ReactorKafkaEventStoreIT {
         // Given
         var events = testEvents(10);
 
-        var keyMap = new HashMap<UUID, URI>();
+        var keyMap = new HashMap<Object, URI>();
 
         for (var event : events) {
             var encryptionKey = URI.create("test-kms://test-keys/" + event.key().toString());
@@ -199,7 +199,7 @@ class EncryptedReactorKafkaEventStoreIT extends ReactorKafkaEventStoreIT {
         // Given
         var events = testEvents(10);
 
-        var keyMap = new HashMap<UUID, URI>();
+        var keyMap = new HashMap<Object, URI>();
 
         for (var event : events) {
             var encryptionKey = URI.create("test-kms://test-keys/" + event.key().toString());
@@ -245,7 +245,7 @@ class EncryptedReactorKafkaEventStoreIT extends ReactorKafkaEventStoreIT {
         // Given
         var events = testEvents(10);
 
-        var keyMap = new HashMap<UUID, URI>();
+        var keyMap = new HashMap<Object, URI>();
 
         for (var event : events) {
             var encryptionKey = URI.create("test-kms://test-keys/" + event.key().toString());

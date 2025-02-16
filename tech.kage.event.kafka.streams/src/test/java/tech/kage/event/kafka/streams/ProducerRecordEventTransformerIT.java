@@ -137,7 +137,7 @@ class ProducerRecordEventTransformerIT {
 
     @ParameterizedTest
     @MethodSource("testEvents")
-    void transformsEventIntoProducerRecord(Event<?> event, ProducerRecord<UUID, byte[]> expectedRecord) {
+    void transformsEventIntoProducerRecord(Event<?, ?> event, ProducerRecord<?, byte[]> expectedRecord) {
         // When
         var transformedRecord = eventTransformer.transform(event, TEST_EVENTS, null).block();
 
@@ -161,7 +161,7 @@ class ProducerRecordEventTransformerIT {
 
     @ParameterizedTest
     @MethodSource("testEvents")
-    void encryptsAndTransformsEventIntoProducerRecord(Event<?> event, ProducerRecord<UUID, byte[]> expectedRecord)
+    void encryptsAndTransformsEventIntoProducerRecord(Event<?, ?> event, ProducerRecord<?, byte[]> expectedRecord)
             throws GeneralSecurityException {
         // Given
         var encryptionKey = URI.create("test-kms://test-keys/" + event.key().toString());
@@ -214,14 +214,14 @@ class ProducerRecordEventTransformerIT {
         return Stream.of(
                 arguments(
                         named(
-                                "event without headers",
+                                "event without headers with UUID key",
                                 Event.from(
                                         UUID.fromString("bb15137d-8f16-4a19-a023-6845b9d1bead"),
                                         TestPayload.newBuilder().setText("test payload 1").build(),
                                         Instant.ofEpochMilli(1734149827923l),
                                         Map.of())),
                         named(
-                                "producerRecord without headers",
+                                "producerRecord without headers with UUID key",
                                 producerRecord(
                                         UUID.fromString("bb15137d-8f16-4a19-a023-6845b9d1bead"),
                                         serialize(TestPayload.newBuilder().setText("test payload 1").build()),
@@ -229,9 +229,9 @@ class ProducerRecordEventTransformerIT {
                                         List.of()))),
                 arguments(
                         named(
-                                "event with headers",
+                                "event with headers with String key",
                                 Event.from(
-                                        UUID.fromString("23debd32-09cd-4a20-a403-c18793ecd2d2"),
+                                        "test-event-2",
                                         TestPayload.newBuilder().setText("test payload 2").build(),
                                         Instant.ofEpochMilli(1734174935363l),
                                         Map.of(
@@ -242,9 +242,9 @@ class ProducerRecordEventTransformerIT {
                                                         .getBytes(),
                                                 "bTest", "1".getBytes()))),
                         named(
-                                "producerRecord with headers",
+                                "producerRecord with headers with String key",
                                 producerRecord(
-                                        UUID.fromString("23debd32-09cd-4a20-a403-c18793ecd2d2"),
+                                        "test-event-2",
                                         serialize(TestPayload.newBuilder().setText("test payload 2").build()),
                                         1734174935363l,
                                         List.of(
@@ -256,7 +256,7 @@ class ProducerRecordEventTransformerIT {
                                                                 .getBytes()))))));
     }
 
-    private static ProducerRecord<UUID, byte[]> producerRecord(UUID key, byte[] payload, long timestamp,
+    private static ProducerRecord<Object, byte[]> producerRecord(Object key, byte[] payload, long timestamp,
             List<Header> headers) {
         return new ProducerRecord<>(TEST_EVENTS, null, timestamp, key, payload, headers);
     }

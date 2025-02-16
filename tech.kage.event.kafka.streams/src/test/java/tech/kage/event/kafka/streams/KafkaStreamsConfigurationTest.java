@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023, Dariusz Szpakowski
+ * Copyright (c) 2023-2025, Dariusz Szpakowski
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -29,6 +29,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.List;
 
+import org.apache.kafka.common.serialization.Serdes.StringSerde;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 
@@ -42,7 +43,7 @@ class KafkaStreamsConfigurationTest {
     KafkaStreamsEventStore.Config config = new KafkaStreamsEventStore.Config();
 
     @Test
-    void createsKafkaStreamsConfig() {
+    void createsDefaultKafkaStreamsConfig() {
         // Given
         var applicationId = "test-app";
 
@@ -53,10 +54,73 @@ class KafkaStreamsConfigurationTest {
 
         var expectedBootstrapServers = "localhost:9092";
         var expectedSchemaRegistryUrl = "http://localhost:8989";
-        var expectedKeySerde = "org.apache.kafka.common.serialization.Serdes$UUIDSerde";
+        var expectedKeySerde = StringSerde.class;
         var expectedValueSerde = "io.confluent.kafka.streams.serdes.avro.SpecificAvroSerde";
         var expectedProcessingGuarantee = "exactly_once_v2";
         var expectedValueSubjectNameStrategy = "io.confluent.kafka.serializers.subject.RecordNameStrategy";
+
+        // When
+        var kStreamsConfig = config.kStreamsConfig(kafkaProperties, applicationId);
+
+        // Then
+        var configurationProperties = kStreamsConfig.asProperties();
+
+        assertThat(configurationProperties.get("application.id"))
+                .describedAs("application id")
+                .isEqualTo(applicationId);
+
+        assertThat(configurationProperties.get("bootstrap.servers"))
+                .describedAs("bootstrap servers")
+                .isEqualTo(expectedBootstrapServers);
+
+        assertThat(configurationProperties.get("schema.registry.url"))
+                .describedAs("schema registry url")
+                .isEqualTo(expectedSchemaRegistryUrl);
+
+        assertThat(configurationProperties.get("default.key.serde"))
+                .describedAs("key serde")
+                .isEqualTo(expectedKeySerde);
+
+        assertThat(configurationProperties.get("default.value.serde"))
+                .describedAs("value serde")
+                .isEqualTo(expectedValueSerde);
+
+        assertThat(configurationProperties.get("processing.guarantee"))
+                .describedAs("processing guarantee")
+                .isEqualTo(expectedProcessingGuarantee);
+
+        assertThat(configurationProperties.get("value.subject.name.strategy"))
+                .describedAs("value subject name strategy")
+                .isEqualTo(expectedValueSubjectNameStrategy);
+    }
+
+    @Test
+    void allowsOverridingDefaultKafkaStreamsConfig() {
+        // Given
+        var applicationId = "test-app";
+
+        var kafkaProperties = new KafkaProperties();
+
+        kafkaProperties.setBootstrapServers(List.of("localhost:9092"));
+        kafkaProperties.getProperties().put("schema.registry.url", "http://localhost:8989");
+        kafkaProperties.getProperties().put(
+                "default.key.serde",
+                "org.apache.kafka.common.serialization.Serdes$UUIDSerde");
+        kafkaProperties.getProperties().put(
+                "value.subject.name.strategy",
+                "io.confluent.kafka.serializers.subject.TopicNameStrategy");
+
+        // invalid config values that should be overridden
+        kafkaProperties.getProperties().put("application.id", "invalid-application-id");
+        kafkaProperties.getProperties().put("processing.guarantee", "invalid-guarantee");
+        kafkaProperties.getProperties().put("default.value.serde", "invalid-value-serde");
+
+        var expectedBootstrapServers = "localhost:9092";
+        var expectedSchemaRegistryUrl = "http://localhost:8989";
+        var expectedKeySerde = "org.apache.kafka.common.serialization.Serdes$UUIDSerde";
+        var expectedValueSerde = "io.confluent.kafka.streams.serdes.avro.SpecificAvroSerde";
+        var expectedProcessingGuarantee = "exactly_once_v2";
+        var expectedValueSubjectNameStrategy = "io.confluent.kafka.serializers.subject.TopicNameStrategy";
 
         // When
         var kStreamsConfig = config.kStreamsConfig(kafkaProperties, applicationId);

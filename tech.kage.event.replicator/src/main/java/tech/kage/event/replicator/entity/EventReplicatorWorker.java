@@ -32,7 +32,6 @@ import java.nio.ByteBuffer;
 import java.sql.Timestamp;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import java.util.stream.Stream;
 
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -179,7 +178,7 @@ class EventReplicatorWorker implements Runnable {
             for (var event : eventList) {
                 newLastId = (Long) event.get("id");
 
-                var key = (UUID) event.get("key");
+                var key = event.get("key");
                 var data = (byte[]) event.get("data");
                 var metadata = (byte[]) event.get("metadata");
                 var timestamp = (Timestamp) event.get("timestamp");
