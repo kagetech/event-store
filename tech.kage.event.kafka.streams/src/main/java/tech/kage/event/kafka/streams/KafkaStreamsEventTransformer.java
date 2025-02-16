@@ -33,7 +33,6 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.SequencedMap;
-import java.util.UUID;
 
 import org.apache.avro.specific.SpecificRecord;
 import org.apache.kafka.common.errors.SerializationException;
@@ -52,12 +51,12 @@ import tech.kage.event.crypto.EventEncryptor;
  * @author Dariusz Szpakowski
  */
 @Component
-class KafkaStreamsEventTransformer {
+class KafkaStreamsEventTransformer<K, V extends SpecificRecord> {
     private static final String METADATA_PARTITION = "partition";
     private static final String METADATA_OFFSET = "offset";
     private static final String METADATA_HEADER_PREFIX = "header.";
 
-    private final Deserializer<SpecificRecord> kafkaAvroDeserializer;
+    private final Deserializer<V> kafkaAvroDeserializer;
     private final EventEncryptor eventEncryptor;
 
     /**
@@ -66,7 +65,7 @@ class KafkaStreamsEventTransformer {
      * @param kafkaAvroDeserializer an instance of {@link Deserializer}
      * @param eventEncryptor        an instance of {@link EventEncryptor}
      */
-    KafkaStreamsEventTransformer(Deserializer<SpecificRecord> kafkaAvroDeserializer, EventEncryptor eventEncryptor) {
+    KafkaStreamsEventTransformer(Deserializer<V> kafkaAvroDeserializer, EventEncryptor eventEncryptor) {
         this.kafkaAvroDeserializer = kafkaAvroDeserializer;
         this.eventEncryptor = eventEncryptor;
     }
@@ -82,7 +81,7 @@ class KafkaStreamsEventTransformer {
      * 
      * @throws SerializationException if event payload decryption fails
      */
-    Event<SpecificRecord> transform(FixedKeyRecord<UUID, byte[]> message, Optional<RecordMetadata> recordMetadata) {
+    Event<K, V> transform(FixedKeyRecord<K, byte[]> message, Optional<RecordMetadata> recordMetadata) {
         var key = message.key();
         var encryptedPayload = message.value();
         var timestamp = Instant.ofEpochMilli(message.timestamp());

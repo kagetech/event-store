@@ -59,13 +59,13 @@ import tech.kage.event.crypto.MetadataSerializer;
  * 
  * @author Dariusz Szpakowski
  */
-class EncryptedPostgresEventStoreIT extends PostgresEventStoreIT {
+class EncryptedPostgresEventStoreIT extends UUIDKeyPostgresEventStoreIT {
     @Autowired
     EventEncryptor eventEncryptor;
 
     static final Map<URI, KeysetHandle> testKms = new HashMap<>();
 
-    static class TestConfiguration extends PostgresEventStoreIT.TestConfiguration {
+    static class TestConfiguration extends UUIDKeyPostgresEventStoreIT.TestConfiguration {
         @Bean
         @Scope(SCOPE_PROTOTYPE)
         Aead aead(URI encryptionKey) throws GeneralSecurityException {
@@ -75,7 +75,7 @@ class EncryptedPostgresEventStoreIT extends PostgresEventStoreIT {
 
     @ParameterizedTest
     @MethodSource("testEvents")
-    void savesEncryptedEventInDatabase(Event<TestPayload> event) throws GeneralSecurityException {
+    void savesEncryptedEventInDatabase(Event<UUID, TestPayload> event) throws GeneralSecurityException {
         // Given
         var topic = "test_events";
         var encryptionKey = URI.create("test-kms://test-keys/" + event.key().toString());
@@ -143,7 +143,7 @@ class EncryptedPostgresEventStoreIT extends PostgresEventStoreIT {
 
     @ParameterizedTest
     @MethodSource("testEvents")
-    void enforcesEventPayloadIntegrity(Event<TestPayload> event) throws GeneralSecurityException {
+    void enforcesEventPayloadIntegrity(Event<UUID, TestPayload> event) throws GeneralSecurityException {
         // Given
         var topic = "test_events";
         var encryptionKey = URI.create("test-kms://test-keys/" + event.key().toString());
@@ -187,7 +187,8 @@ class EncryptedPostgresEventStoreIT extends PostgresEventStoreIT {
 
     @ParameterizedTest
     @MethodSource("testEvents")
-    void throwsExceptionWhenEventPayloadIntegrityIsViolated(Event<TestPayload> event) throws GeneralSecurityException {
+    void throwsExceptionWhenEventPayloadIntegrityIsViolated(Event<UUID, TestPayload> event)
+            throws GeneralSecurityException {
         // Given
         var topic = "test_events";
         var encryptionKey = URI.create("test-kms://test-keys/" + event.key().toString());

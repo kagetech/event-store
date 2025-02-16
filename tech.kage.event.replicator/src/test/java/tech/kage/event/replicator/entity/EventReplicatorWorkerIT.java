@@ -32,9 +32,6 @@ import static tech.kage.event.EventStore.SOURCE_ID;
 import static tech.kage.event.replicator.entity.EventReplicator.PROGRESS_TOPIC;
 
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.Reader;
-import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -65,7 +62,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.test.context.ActiveProfiles;
-import org.springframework.util.FileCopyUtils;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -82,7 +78,7 @@ import tech.kage.event.crypto.MetadataSerializer;
 @SpringBootTest
 @ActiveProfiles("test")
 @Testcontainers
-class EventReplicatorWorkerIT {
+abstract class EventReplicatorWorkerIT<K> {
     @Autowired
     JdbcTemplate jdbcTemplate;
 
@@ -120,18 +116,13 @@ class EventReplicatorWorkerIT {
     }
 
     @BeforeEach
-    void setUp(@Value("classpath:/test-data/events/ddl.sql") Resource ddl) {
+    void setUp(@Value("classpath:/test-data/events/ddl.sql") Resource ddl) throws IOException {
         topic = "test_" + System.currentTimeMillis() + "_events";
 
-        jdbcTemplate.execute(getContentAsString(ddl).replace("events.test_events", "events." + topic));
-    }
-
-    private String getContentAsString(Resource resource) {
-        try (Reader reader = new InputStreamReader(resource.getInputStream(), StandardCharsets.UTF_8)) {
-            return FileCopyUtils.copyToString(reader);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
+        jdbcTemplate.execute(
+                ddl.getContentAsString(StandardCharsets.UTF_8)
+                        .replace("<<topic_name>>", topic)
+                        .replace("<<key_type>>", getKeyType()));
     }
 
     @Test
@@ -417,7 +408,7 @@ class EventReplicatorWorkerIT {
     private EventData testEvent(int id) {
         return new EventData(
                 id,
-                UUID.randomUUID(),
+                getTestEventKey(id),
                 ("test payload " + id).getBytes(),
                 Map.of(
                         "dTest", "meta_value".getBytes(),
@@ -426,6 +417,10 @@ class EventReplicatorWorkerIT {
                 Instant.now());
     }
 
-    private record EventData(long id, UUID key, byte[] data, Map<String, Object> metadata, Instant timestamp) {
+    protected abstract String getKeyType();
+
+    protected abstract Object getTestEventKey(int id);
+
+    protected record EventData(long id, Object key, byte[] data, Map<String, Object> metadata, Instant timestamp) {
     }
 }

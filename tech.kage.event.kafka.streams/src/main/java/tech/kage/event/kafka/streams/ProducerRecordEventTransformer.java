@@ -33,7 +33,6 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 import org.apache.avro.specific.SpecificRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -77,7 +76,7 @@ class ProducerRecordEventTransformer {
      * 
      * @return a {@link ProducerRecord} created from the given {@link Event}
      */
-    Mono<ProducerRecord<UUID, byte[]>> transform(Event<?> event, String topic, URI encryptionKey) {
+    Mono<ProducerRecord<Object, byte[]>> transform(Event<?, ?> event, String topic, URI encryptionKey) {
         return Mono
                 .fromCallable(() -> kafkaAvroSerializer.serialize(topic, event.payload()))
                 .subscribeOn(Schedulers.boundedElastic())

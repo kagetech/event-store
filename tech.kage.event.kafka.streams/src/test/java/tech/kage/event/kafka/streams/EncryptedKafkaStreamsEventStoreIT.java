@@ -38,6 +38,7 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.UUID;
 
+import org.apache.avro.specific.SpecificRecord;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -66,7 +67,7 @@ import tech.kage.event.crypto.EventEncryptor;
  * 
  * @author Dariusz Szpakowski
  */
-class EncryptedKafkaStreamsEventStoreIT extends KafkaStreamsEventStoreIT {
+class EncryptedKafkaStreamsEventStoreIT extends UUIDKeyKafkaStreamsEventStoreIT {
     @Autowired
     EventEncryptor eventEncryptor;
 
@@ -79,7 +80,7 @@ class EncryptedKafkaStreamsEventStoreIT extends KafkaStreamsEventStoreIT {
     @Component
     static class TestEncryptedStreamsSubscriber {
         @Autowired
-        void init(KafkaAdmin kafkaAdmin, KafkaStreamsEventStore eventStore) {
+        void init(KafkaAdmin kafkaAdmin, KafkaStreamsEventStore<UUID, SpecificRecord> eventStore) {
             kafkaAdmin.createOrModifyTopics(TopicBuilder.name(ENCRYPTED_TEST_EVENTS).build());
             kafkaAdmin.createOrModifyTopics(TopicBuilder.name(ENCRYPTED_TEST_EVENTS_IN).build());
             kafkaAdmin.createOrModifyTopics(TopicBuilder.name(UNENCRYPTED_TEST_EVENTS_OUT).build());

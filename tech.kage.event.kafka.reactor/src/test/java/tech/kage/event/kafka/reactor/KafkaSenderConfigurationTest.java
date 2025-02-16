@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023, Dariusz Szpakowski
+ * Copyright (c) 2023-2025, Dariusz Szpakowski
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -29,6 +29,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.apache.kafka.common.serialization.UUIDSerializer;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 
@@ -46,8 +47,8 @@ class KafkaSenderConfigurationTest {
         // Given
         var kafkaProperties = new KafkaProperties();
 
-        var expectedKeySerializer = "org.apache.kafka.common.serialization.UUIDSerializer";
-        var expectedValueSerializer = "org.apache.kafka.common.serialization.ByteArraySerializer";
+        var expectedKeySerializer = StringSerializer.class;
+        var expectedValueSerializer = ByteArraySerializer.class;
 
         // When
         var senderOptions = config.kafkaSenderOptions(kafkaProperties);
@@ -69,7 +70,7 @@ class KafkaSenderConfigurationTest {
         // Given
         var kafkaProperties = new KafkaProperties();
 
-        var keySerializer = StringSerializer.class;
+        var keySerializer = UUIDSerializer.class;
         var valueSerializer = ByteArraySerializer.class;
         var testPropertyValue = "test-value";
 
@@ -82,8 +83,8 @@ class KafkaSenderConfigurationTest {
                 .getProperties()
                 .put("test.property", testPropertyValue);
 
-        var expectedKeySerializer = "org.apache.kafka.common.serialization.UUIDSerializer";
-        var expectedValueSerializer = "org.apache.kafka.common.serialization.ByteArraySerializer";
+        var expectedKeySerializer = UUIDSerializer.class;
+        var expectedValueSerializer = ByteArraySerializer.class;
         var expectedTestPropertyValue = testPropertyValue;
 
         // When

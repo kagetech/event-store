@@ -34,9 +34,13 @@ import reactor.core.publisher.Mono;
 /**
  * A database focused on storing events.
  * 
+ * 
+ * @param <K> the type of stored events' keys
+ * @param <V> the type of stored events' payloads
+ * 
  * @author Dariusz Szpakowski
  */
-public interface EventStore {
+public interface EventStore<K, V extends SpecificRecord> {
     /**
      * Constant representing the event identifier in the source database.
      */
@@ -50,7 +54,6 @@ public interface EventStore {
     /**
      * Saves the specified event in the event store.
      *
-     * @param <T>   the event's payload type
      * @param topic topic which is used for grouping events
      * @param event event to be saved
      *
@@ -62,7 +65,7 @@ public interface EventStore {
      * @throws IllegalArgumentException if the specified event contains metadata
      *                                  with key {@code id} or {@code kid}
      */
-    <T extends SpecificRecord> Mono<Event<T>> save(String topic, Event<T> event);
+    Mono<Event<K, V>> save(String topic, Event<K, V> event);
 
     /**
      * Saves the specified event in the event store in its authenticated and
@@ -70,7 +73,6 @@ public interface EventStore {
      * Associated Data (AEAD). The {@code Event}'s payload is encrypted and the key,
      * timestamp and metadata are the associated non-encrypted authenticated data.
      *
-     * @param <T>           the event's payload type
      * @param topic         topic which is used for grouping events
      * @param event         event to be saved
      * @param encryptionKey encryption key to use
@@ -84,5 +86,5 @@ public interface EventStore {
      * @throws IllegalArgumentException if the specified event contains metadata
      *                                  with key {@code id} or {@code kid}
      */
-    <T extends SpecificRecord> Mono<Event<T>> save(String topic, Event<T> event, URI encryptionKey);
+    Mono<Event<K, V>> save(String topic, Event<K, V> event, URI encryptionKey);
 }

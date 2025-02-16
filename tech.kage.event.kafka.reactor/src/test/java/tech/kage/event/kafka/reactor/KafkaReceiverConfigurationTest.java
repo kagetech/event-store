@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023-2024, Dariusz Szpakowski
+ * Copyright (c) 2023-2025, Dariusz Szpakowski
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -32,6 +32,7 @@ import java.util.Optional;
 
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
+import org.apache.kafka.common.serialization.UUIDDeserializer;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 
@@ -55,8 +56,8 @@ class KafkaReceiverConfigurationTest {
         var expectedIsolationLevel = "read_committed";
         var expectedEnableAutoCommit = "false";
         var expectedAutoOffsetReset = "earliest";
-        var expectedKeyDeserializer = "org.apache.kafka.common.serialization.UUIDDeserializer";
-        var expectedValueDeserializer = "org.apache.kafka.common.serialization.ByteArrayDeserializer";
+        var expectedKeyDeserializer = StringDeserializer.class;
+        var expectedValueDeserializer = ByteArrayDeserializer.class;
 
         // When
         var receiverOptions = config.kafkaReceiverOptions(kafkaProperties, Optional.empty());
@@ -114,7 +115,7 @@ class KafkaReceiverConfigurationTest {
         var enableAutoCommit = true;
         var autoOffsetReset = "latest";
         var specificAvroReader = "true";
-        var keyDeserializer = StringDeserializer.class;
+        var keyDeserializer = UUIDDeserializer.class;
         var valueDeserializer = ByteArrayDeserializer.class;
         var valueSubjectNameStrategy = "io.confluent.kafka.serializers.subject.TopicNameStrategy";
 
@@ -137,7 +138,7 @@ class KafkaReceiverConfigurationTest {
         var expectedEnableAutoCommit = "false";
         var expectedAutoOffsetReset = "earliest";
         var expectedSpecificAvroReader = specificAvroReader;
-        var expectedKeyDeserializer = "org.apache.kafka.common.serialization.UUIDDeserializer";
+        var expectedKeyDeserializer = UUIDDeserializer.class;
 
         // When
         var receiverOptions = config.kafkaReceiverOptions(kafkaProperties, Optional.empty());

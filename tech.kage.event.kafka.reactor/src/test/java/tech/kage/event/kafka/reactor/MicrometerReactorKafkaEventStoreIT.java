@@ -37,6 +37,8 @@ import java.util.stream.IntStream;
 import org.apache.avro.specific.SpecificRecord;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.Serializer;
+import org.apache.kafka.common.serialization.UUIDDeserializer;
+import org.apache.kafka.common.serialization.UUIDSerializer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -87,13 +89,13 @@ import tech.kage.event.Event;
 class MicrometerReactorKafkaEventStoreIT {
     // UUT
     @Autowired
-    ReactorKafkaEventStore eventStore;
+    ReactorKafkaEventStore<UUID, SpecificRecord> eventStore;
 
     @Autowired
     DatabaseClient databaseClient;
 
     @Autowired
-    SenderOptions<UUID, byte[]> kafkaSenderOptions;
+    SenderOptions<Object, byte[]> kafkaSenderOptions;
 
     @Autowired
     Serializer<SpecificRecord> kafkaAvroSerializer;
@@ -135,6 +137,9 @@ class MicrometerReactorKafkaEventStoreIT {
     @DynamicPropertySource
     static void overrideProperties(DynamicPropertyRegistry registry) {
         registry.add("spring.kafka.bootstrap-servers", kafka::getBootstrapServers);
+
+        registry.add("spring.kafka.producer.key-serializer", UUIDSerializer.class::getName);
+        registry.add("spring.kafka.consumer.key-deserializer", UUIDDeserializer.class::getName);
 
         registry.add(
                 "spring.kafka.properties.schema.registry.url",

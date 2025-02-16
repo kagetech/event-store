@@ -91,7 +91,7 @@ import tech.kage.event.crypto.EventEncryptor;
 class KafkaStreamsEventTransformerIT {
     // UUT
     @Autowired
-    KafkaStreamsEventTransformer eventTransformer;
+    KafkaStreamsEventTransformer<Object, SpecificRecord> eventTransformer;
 
     @Autowired
     EventEncryptor eventEncryptor;
@@ -128,9 +128,9 @@ class KafkaStreamsEventTransformerIT {
     @ParameterizedTest
     @MethodSource("testMessages")
     void transformsMessageIntoEvent(
-            FixedKeyRecord<UUID, byte[]> message,
+            FixedKeyRecord<Object, byte[]> message,
             Optional<RecordMetadata> recordMetadata,
-            Event<?> expectedEvent) {
+            Event<?, ?> expectedEvent) {
         // When
         var transformedEvent = eventTransformer.transform(message, recordMetadata);
 
@@ -155,9 +155,9 @@ class KafkaStreamsEventTransformerIT {
     @ParameterizedTest
     @MethodSource("testEncryptedMessages")
     void decryptsAndTransformsMessageIntoEvent(
-            FixedKeyRecord<UUID, byte[]> message,
+            FixedKeyRecord<Object, byte[]> message,
             Optional<RecordMetadata> recordMetadata,
-            Event<?> expectedEvent) throws GeneralSecurityException {
+            Event<?, ?> expectedEvent) throws GeneralSecurityException {
         // Given
         var encryptionKey = URI.create(new String(message.headers().lastHeader(ENCRYPTION_KEY_ID).value()));
 
@@ -189,9 +189,9 @@ class KafkaStreamsEventTransformerIT {
     @ParameterizedTest
     @MethodSource("testEncryptedMessages")
     void throwsExceptionWhenInvalidEncryptionKey(
-            FixedKeyRecord<UUID, byte[]> message,
+            FixedKeyRecord<Object, byte[]> message,
             Optional<RecordMetadata> recordMetadata,
-            Event<?> expectedEvent) throws GeneralSecurityException {
+            Event<?, ?> expectedEvent) throws GeneralSecurityException {
         // Given
         var encryptionKey = URI.create(new String(message.headers().lastHeader(ENCRYPTION_KEY_ID).value()));
         var invalidEncryptionKey = URI.create("test-kms://test-keys/invalid");
@@ -216,9 +216,9 @@ class KafkaStreamsEventTransformerIT {
     @ParameterizedTest
     @MethodSource("testEncryptedMessages")
     void throwsExceptionWhenEventPayloadIntegrityIsViolated(
-            FixedKeyRecord<UUID, byte[]> message,
+            FixedKeyRecord<Object, byte[]> message,
             Optional<RecordMetadata> recordMetadata,
-            Event<?> expectedEvent) throws GeneralSecurityException {
+            Event<?, ?> expectedEvent) throws GeneralSecurityException {
         // Given
         var invalidKey = UUID.randomUUID(); // use invalid key
 
@@ -250,7 +250,7 @@ class KafkaStreamsEventTransformerIT {
         return Stream.of(
                 arguments(
                         named(
-                                "message without metadata",
+                                "message without metadata with UUID key",
                                 message(
                                         UUID.fromString("544640f3-5263-4d1b-a554-44d46f2f41d7"),
                                         serialize(TestPayload.newBuilder().setText("no metadata").build()),
@@ -258,7 +258,7 @@ class KafkaStreamsEventTransformerIT {
                                         List.of())),
                         named("no record metadata", Optional.empty()),
                         named(
-                                "event without metadata",
+                                "event without metadata with UUID key",
                                 Event.from(
                                         UUID.fromString("544640f3-5263-4d1b-a554-44d46f2f41d7"),
                                         TestPayload.newBuilder().setText("no metadata").build(),
@@ -266,33 +266,33 @@ class KafkaStreamsEventTransformerIT {
                                         Map.of()))),
                 arguments(
                         named(
-                                "message without headers",
+                                "message without headers with String key",
                                 message(
-                                        UUID.fromString("bb15137d-8f16-4a19-a023-6845b9d1bead"),
+                                        "test-event--1",
                                         serialize(TestPayload.newBuilder().setText("test payload 1").build()),
                                         1734149827923l,
                                         List.of())),
                         named("[partition=1, offset=5]", recordMetadata(1, 5)),
                         named(
-                                "event without headers",
+                                "event without headers with String key",
                                 Event.from(
-                                        UUID.fromString("bb15137d-8f16-4a19-a023-6845b9d1bead"),
+                                        "test-event--1",
                                         TestPayload.newBuilder().setText("test payload 1").build(),
                                         Instant.ofEpochMilli(1734149827923l),
                                         Map.of("partition", 1, "offset", 5l)))),
                 arguments(
                         named(
-                                "message with headers",
+                                "message with headers with Integer key",
                                 message(
-                                        UUID.fromString("23debd32-09cd-4a20-a403-c18793ecd2d2"),
+                                        2,
                                         serialize(TestPayload.newBuilder().setText("test payload 2").build()),
                                         1734174935363l,
                                         List.of(new RecordHeader(SOURCE_ID, "15".getBytes())))),
                         named("[partition=2, offset=8]", recordMetadata(2, 8)),
                         named(
-                                "event with headers",
+                                "event with headers with Integer key",
                                 Event.from(
-                                        UUID.fromString("23debd32-09cd-4a20-a403-c18793ecd2d2"),
+                                        2,
                                         TestPayload.newBuilder().setText("test payload 2").build(),
                                         Instant.ofEpochMilli(1734174935363l),
                                         Map.of("partition", 2, "offset", 8l, "header.id", "15".getBytes())))));
@@ -327,9 +327,9 @@ class KafkaStreamsEventTransformerIT {
                                                         .getBytes())))),
                 arguments(
                         named(
-                                "encrypted message with headers",
+                                "encrypted message with headers with String key",
                                 message(
-                                        UUID.fromString("23debd32-09cd-4a20-a403-c18793ecd2d2"),
+                                        "test-event-2",
                                         serialize(TestPayload.newBuilder().setText("test payload 2").build()),
                                         1734174935363l,
                                         List.of(
@@ -342,7 +342,7 @@ class KafkaStreamsEventTransformerIT {
                         named(
                                 "event with headers",
                                 Event.from(
-                                        UUID.fromString("23debd32-09cd-4a20-a403-c18793ecd2d2"),
+                                        "test-event-2",
                                         TestPayload.newBuilder().setText("test payload 2").build(),
                                         Instant.ofEpochMilli(1734174935363l),
                                         Map.of(
@@ -354,8 +354,8 @@ class KafkaStreamsEventTransformerIT {
                                                         .getBytes())))));
     }
 
-    private static FixedKeyRecord<UUID, byte[]> message(
-            UUID key,
+    private static FixedKeyRecord<Object, byte[]> message(
+            Object key,
             byte[] payload,
             long timestamp,
             List<Header> headers) {
@@ -363,7 +363,7 @@ class KafkaStreamsEventTransformerIT {
     }
 
     @SuppressWarnings("unchecked")
-    private static FixedKeyRecord<UUID, byte[]> message(UUID key, byte[] payload, long timestamp, Headers headers) {
+    private static FixedKeyRecord<Object, byte[]> message(Object key, byte[] payload, long timestamp, Headers headers) {
         var message = Mockito.mock(FixedKeyRecord.class);
 
         given(message.key()).willReturn(key);
@@ -395,7 +395,7 @@ class KafkaStreamsEventTransformerIT {
         }
     }
 
-    private FixedKeyRecord<UUID, byte[]> encrypt(FixedKeyRecord<UUID, byte[]> message, URI encryptionKey) {
+    private FixedKeyRecord<Object, byte[]> encrypt(FixedKeyRecord<Object, byte[]> message, URI encryptionKey) {
         var metadata = new HashMap<String, Object>();
 
         for (var header : message.headers()) {

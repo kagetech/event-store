@@ -87,7 +87,7 @@ class EventEncryptorIT {
 
     @ParameterizedTest
     @MethodSource("testEvents")
-    void encryptsPayloadAuthenticatedWithMetadata(byte[] payload, UUID key, Instant timestamp,
+    void encryptsPayloadAuthenticatedWithMetadata(byte[] payload, Object key, Instant timestamp,
             Map<String, Object> metadata) throws GeneralSecurityException {
         // Given
         var encryptionKey = URI.create("test-kms://test-keys/" + key.toString());
@@ -115,7 +115,7 @@ class EventEncryptorIT {
 
     @ParameterizedTest
     @MethodSource("testEvents")
-    void decryptsEncryptedPayloadAuthenticatedWithMetadata(byte[] payload, UUID key, Instant timestamp,
+    void decryptsEncryptedPayloadAuthenticatedWithMetadata(byte[] payload, Object key, Instant timestamp,
             Map<String, Object> metadata) throws GeneralSecurityException {
         // Given
         var encryptionKey = URI.create("test-kms://test-keys/" + key.toString());
@@ -141,7 +141,7 @@ class EventEncryptorIT {
 
     @ParameterizedTest
     @MethodSource("testEvents")
-    void throwsExceptionWhenInvalidEncryptionKey(byte[] payload, UUID key, Instant timestamp,
+    void throwsExceptionWhenInvalidEncryptionKey(byte[] payload, Object key, Instant timestamp,
             Map<String, Object> metadata) throws GeneralSecurityException {
         // Given
         var encryptionKey = URI.create("test-kms://test-keys/" + key.toString());
@@ -171,7 +171,7 @@ class EventEncryptorIT {
 
     @ParameterizedTest
     @MethodSource("testEvents")
-    void throwsExceptionWhenEventPayloadIntegrityIsViolated(byte[] payload, UUID key, Instant timestamp,
+    void throwsExceptionWhenEventPayloadIntegrityIsViolated(byte[] payload, Object key, Instant timestamp,
             Map<String, Object> metadata) throws GeneralSecurityException {
         // Given
         var invalidKey = UUID.randomUUID(); // use invalid key
@@ -201,8 +201,8 @@ class EventEncryptorIT {
 
     @ParameterizedTest
     @MethodSource("testEvents")
-    void ignoresSourceIdDuringDecryption(byte[] payload, UUID key, Instant timestamp,
-            Map<String, Object> metadata) throws GeneralSecurityException {
+    void ignoresSourceIdDuringDecryption(byte[] payload, Object key, Instant timestamp, Map<String, Object> metadata)
+            throws GeneralSecurityException {
         // Given
         var encryptionKey = URI.create("test-kms://test-keys/" + key.toString());
 
@@ -228,7 +228,7 @@ class EventEncryptorIT {
 
     @ParameterizedTest
     @MethodSource("testEvents")
-    void returnsPlaintextPayloadWhenEncryptionKeyNotSet(byte[] payload, UUID key, Instant timestamp,
+    void returnsPlaintextPayloadWhenEncryptionKeyNotSet(byte[] payload, Object key, Instant timestamp,
             Map<String, Object> metadata) throws GeneralSecurityException {
         // When
         var decryptedPayload = eventEncryptor.decrypt(payload, key, timestamp, metadata);
@@ -243,7 +243,7 @@ class EventEncryptorIT {
         return Stream.of(
                 arguments(
                         named("test payload 1", "test payload 1".getBytes()),
-                        UUID.fromString("bb15137d-8f16-4a19-a023-6845b9d1bead"),
+                        "test-event-1",
                         Instant.ofEpochMilli(1734149827923l),
                         Map.of()),
                 arguments(

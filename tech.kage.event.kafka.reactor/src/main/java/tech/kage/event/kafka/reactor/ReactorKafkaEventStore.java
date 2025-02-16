@@ -32,7 +32,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 
@@ -46,8 +45,6 @@ import org.apache.kafka.common.IsolationLevel;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
-import org.apache.kafka.common.serialization.UUIDDeserializer;
-import org.apache.kafka.common.serialization.UUIDSerializer;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
@@ -95,7 +92,7 @@ import tech.kage.event.crypto.EventEncryptor;
  * @author Dariusz Szpakowski
  */
 @Component
-public class ReactorKafkaEventStore implements EventStore {
+public class ReactorKafkaEventStore<K, V extends SpecificRecord> implements EventStore<K, V> {
     private static final String SELECT_OFFSET_SQL = """
                 SELECT "offset"
                 FROM %s.topic_offsets
@@ -125,8 +122,8 @@ public class ReactorKafkaEventStore implements EventStore {
     private static final String MICROMETER_TAG_GROUP_ID = "group.id";
     private static final String MICROMETER_TAG_CLIENT_ID = "client.id";
 
-    private final KafkaSender<UUID, byte[]> kafkaSender;
-    private final ReceiverOptions<UUID, byte[]> kafkaReceiverOptions;
+    private final KafkaSender<Object, byte[]> kafkaSender;
+    private final ReceiverOptions<K, byte[]> kafkaReceiverOptions;
     private final DatabaseClient databaseClient;
     private final ReactorKafkaEventTransformer eventTransformer;
     private final Optional<MeterRegistry> meterRegistry;
@@ -160,8 +157,8 @@ public class ReactorKafkaEventStore implements EventStore {
      * @param meterRegistry        optional instance of {@link MeterRegistry}
      */
     ReactorKafkaEventStore(
-            KafkaSender<UUID, byte[]> kafkaSender,
-            ReceiverOptions<UUID, byte[]> kafkaReceiverOptions,
+            KafkaSender<Object, byte[]> kafkaSender,
+            ReceiverOptions<K, byte[]> kafkaReceiverOptions,
             DatabaseClient databaseClient,
             ReactorKafkaEventTransformer eventTransformer,
             Optional<MeterRegistry> meterRegistry) {
@@ -196,18 +193,18 @@ public class ReactorKafkaEventStore implements EventStore {
     }
 
     @Override
-    public <T extends SpecificRecord> Mono<Event<T>> save(String topic, Event<T> event) {
+    public Mono<Event<K, V>> save(String topic, Event<K, V> event) {
         return doSave(topic, event, null);
     }
 
     @Override
-    public <T extends SpecificRecord> Mono<Event<T>> save(String topic, Event<T> event, URI encryptionKey) {
+    public Mono<Event<K, V>> save(String topic, Event<K, V> event, URI encryptionKey) {
         Objects.requireNonNull(encryptionKey, "encryptionKey must not be null");
 
         return doSave(topic, event, encryptionKey);
     }
 
-    private <T extends SpecificRecord> Mono<Event<T>> doSave(String topic, Event<T> event, URI encryptionKey) {
+    private Mono<Event<K, V>> doSave(String topic, Event<K, V> event, URI encryptionKey) {
         Objects.requireNonNull(topic, "topic must not be null");
         Objects.requireNonNull(event, "event must not be null");
 
@@ -240,7 +237,7 @@ public class ReactorKafkaEventStore implements EventStore {
      * 
      * @throws NullPointerException if the specified topic is null
      */
-    public Flux<Mono<Event<SpecificRecord>>> subscribe(String topic) {
+    public Flux<Mono<Event<K, SpecificRecord>>> subscribe(String topic) {
         Objects.requireNonNull(topic, "topic must not be null");
 
         return KafkaReceiver
@@ -345,7 +342,7 @@ public class ReactorKafkaEventStore implements EventStore {
      * 
      * @return consumed event
      */
-    private Mono<Event<SpecificRecord>> consume(ReceiverRecord<UUID, byte[]> event) {
+    private Mono<Event<K, SpecificRecord>> consume(ReceiverRecord<K, byte[]> event) {
         return saveOffset(event).map(eventTransformer::transform);
     }
 
@@ -356,7 +353,7 @@ public class ReactorKafkaEventStore implements EventStore {
      * 
      * @return passed event
      */
-    private Mono<ReceiverRecord<UUID, byte[]>> saveOffset(ReceiverRecord<UUID, byte[]> event) {
+    private Mono<ReceiverRecord<K, byte[]>> saveOffset(ReceiverRecord<K, byte[]> event) {
         return databaseClient
                 .sql(UPDATE_OFFSET_SQL.formatted(eventSchema))
                 .bind(TOPIC_COLUMN, event.topic())
@@ -368,7 +365,7 @@ public class ReactorKafkaEventStore implements EventStore {
                 .thenReturn(event);
     }
 
-    private void updateLastOffset(ReceiverRecord<UUID, byte[]> event) {
+    private void updateLastOffset(ReceiverRecord<K, byte[]> event) {
         lastOffsets.put(new TopicPartition(event.topic(), event.partition()), event.offset());
     }
 
@@ -413,22 +410,21 @@ public class ReactorKafkaEventStore implements EventStore {
     @Import({ ReactorKafkaEventTransformer.class, EventEncryptor.class })
     static class Config {
         @Bean
-        KafkaSender<UUID, byte[]> kafkaSender(SenderOptions<UUID, byte[]> senderOptions) {
+        KafkaSender<Object, byte[]> kafkaSender(SenderOptions<Object, byte[]> senderOptions) {
             return KafkaSender.create(senderOptions);
         }
 
         @Bean
-        SenderOptions<UUID, byte[]> kafkaSenderOptions(KafkaProperties properties) {
+        SenderOptions<Object, byte[]> kafkaSenderOptions(KafkaProperties properties) {
             var props = properties.buildProducerProperties(null);
 
-            props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, UUIDSerializer.class.getName());
-            props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
+            props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class);
 
             return SenderOptions.create(props);
         }
 
         @Bean
-        ReceiverOptions<UUID, byte[]> kafkaReceiverOptions(
+        ReceiverOptions<Object, byte[]> kafkaReceiverOptions(
                 KafkaProperties properties,
                 Optional<MeterRegistry> meterRegistry) {
             var props = properties.buildConsumerProperties(null);
@@ -436,11 +432,10 @@ public class ReactorKafkaEventStore implements EventStore {
             props.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_committed");
             props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
             props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-            props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, UUIDDeserializer.class.getName());
-            props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
+            props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class);
 
             return ReceiverOptions
-                    .<UUID, byte[]>create(props)
+                    .<Object, byte[]>create(props)
                     .consumerListener(
                             meterRegistry.isPresent()
                                     ? new MicrometerConsumerListener(meterRegistry.get())

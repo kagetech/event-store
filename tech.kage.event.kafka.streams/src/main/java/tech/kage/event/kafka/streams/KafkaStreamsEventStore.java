@@ -29,7 +29,6 @@ import java.net.URI;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.avro.specific.SpecificRecord;
@@ -38,7 +37,6 @@ import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.Deserializer;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.common.serialization.Serializer;
-import org.apache.kafka.common.serialization.UUIDSerializer;
 import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.kstream.Consumed;
@@ -87,13 +85,13 @@ import tech.kage.event.crypto.EventEncryptor;
  * @author Dariusz Szpakowski
  */
 @Component
-public class KafkaStreamsEventStore implements EventStore {
-    private final KafkaTemplate<UUID, byte[]> kafkaTemplate;
+public class KafkaStreamsEventStore<K, V extends SpecificRecord> implements EventStore<K, V> {
+    private final KafkaTemplate<Object, byte[]> kafkaTemplate;
     private final ProducerRecordEventTransformer producerRecordEventTransformer;
-    private final KafkaStreamsEventTransformer kafkaStreamsEventTransformer;
+    private final KafkaStreamsEventTransformer<K, V> kafkaStreamsEventTransformer;
     private final StreamsBuilder streamsBuilder;
 
-    private Map<String, KStream<UUID, Event<SpecificRecord>>> streams = new ConcurrentHashMap<>();
+    private Map<String, KStream<K, Event<K, V>>> streams = new ConcurrentHashMap<>();
 
     /**
      * Constructs a new {@link KafkaStreamsEventStore} instance.
@@ -106,9 +104,9 @@ public class KafkaStreamsEventStore implements EventStore {
      * @param streamsBuilder                 an instance of {@link StreamsBuilder}
      */
     KafkaStreamsEventStore(
-            KafkaTemplate<UUID, byte[]> kafkaTemplate,
+            KafkaTemplate<Object, byte[]> kafkaTemplate,
             ProducerRecordEventTransformer producerRecordEventTransformer,
-            KafkaStreamsEventTransformer kafkaStreamsEventTransformer,
+            KafkaStreamsEventTransformer<K, V> kafkaStreamsEventTransformer,
             StreamsBuilder streamsBuilder) {
         this.kafkaTemplate = kafkaTemplate;
         this.producerRecordEventTransformer = producerRecordEventTransformer;
@@ -117,18 +115,18 @@ public class KafkaStreamsEventStore implements EventStore {
     }
 
     @Override
-    public <T extends SpecificRecord> Mono<Event<T>> save(String topic, Event<T> event) {
+    public Mono<Event<K, V>> save(String topic, Event<K, V> event) {
         return doSave(topic, event, null);
     }
 
     @Override
-    public <T extends SpecificRecord> Mono<Event<T>> save(String topic, Event<T> event, URI encryptionKey) {
+    public Mono<Event<K, V>> save(String topic, Event<K, V> event, URI encryptionKey) {
         Objects.requireNonNull(encryptionKey, "encryptionKey must not be null");
 
         return doSave(topic, event, encryptionKey);
     }
 
-    private <T extends SpecificRecord> Mono<Event<T>> doSave(String topic, Event<T> event, URI encryptionKey) {
+    private Mono<Event<K, V>> doSave(String topic, Event<K, V> event, URI encryptionKey) {
         Objects.requireNonNull(topic, "topic must not be null");
         Objects.requireNonNull(event, "event must not be null");
 
@@ -148,22 +146,22 @@ public class KafkaStreamsEventStore implements EventStore {
      * 
      * @throws NullPointerException if the specified topic is null
      */
-    public KStream<UUID, Event<SpecificRecord>> subscribe(String topic) {
+    public KStream<K, Event<K, V>> subscribe(String topic) {
         Objects.requireNonNull(topic, "topic must not be null");
 
         return streams.computeIfAbsent(
                 topic,
                 key -> streamsBuilder
-                        .stream(topic, Consumed.<UUID, byte[]>as(topic + "-input").withValueSerde(Serdes.ByteArray()))
+                        .stream(topic, Consumed.<K, byte[]>as(topic + "-input").withValueSerde(Serdes.ByteArray()))
                         .processValues(EventTransformer::new, Named.as(topic + "-event_transformer")));
     }
 
     /**
      * Transformer of Kafka Streams Records into {@link Event} instances.
      */
-    class EventTransformer extends ContextualFixedKeyProcessor<UUID, byte[], Event<SpecificRecord>> {
+    class EventTransformer extends ContextualFixedKeyProcessor<K, byte[], Event<K, V>> {
         @Override
-        public void process(FixedKeyRecord<UUID, byte[]> message) {
+        public void process(FixedKeyRecord<K, byte[]> message) {
             context().forward(
                     message.withValue(
                             kafkaStreamsEventTransformer.transform(message, context().recordMetadata())));
@@ -187,8 +185,7 @@ public class KafkaStreamsEventStore implements EventStore {
         ProducerFactory<?, ?> kafkaProducerFactory(KafkaProperties properties) {
             var props = properties.buildProducerProperties(null);
 
-            props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, UUIDSerializer.class.getName());
-            props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
+            props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class);
 
             var factory = new DefaultKafkaProducerFactory<>(props);
 
@@ -209,7 +206,7 @@ public class KafkaStreamsEventStore implements EventStore {
 
             props.put(StreamsConfig.APPLICATION_ID_CONFIG, applicationId);
             props.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, String.join(",", properties.getBootstrapServers()));
-            props.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.UUID().getClass().getName());
+            props.putIfAbsent(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.String().getClass());
             props.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, DEFAULT_VALUE_SERDE_CLASS);
             props.put(StreamsConfig.PROCESSING_GUARANTEE_CONFIG, StreamsConfig.EXACTLY_ONCE_V2);
             props.putIfAbsent(VALUE_SUBJECT_NAME_STRATEGY_CONFIG, VALUE_SUBJECT_NAME_STRATEGY);

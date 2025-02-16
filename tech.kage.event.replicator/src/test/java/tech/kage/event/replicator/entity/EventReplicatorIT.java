@@ -139,7 +139,9 @@ class EventReplicatorIT {
         // create source event tables
         for (var topic : topicLastIds.keySet()) {
             jdbcTemplate.execute(
-                    ddl.getContentAsString(StandardCharsets.UTF_8).replace("events.test_events", "events." + topic));
+                    ddl.getContentAsString(StandardCharsets.UTF_8)
+                            .replace("<<topic_name>>", topic)
+                            .replace("<<key_type>>", "uuid"));
         }
     }
 
