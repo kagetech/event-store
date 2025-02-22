@@ -188,7 +188,7 @@ abstract class KafkaStreamsEventStoreIT<K> {
                     // the expected metadata are sorted by key
                     var expectedMetadata = new TreeMap<>(expectedEvent.metadata());
 
-                    return key.equals(expectedEvent.key())
+                    return isEqual(key, expectedEvent.key())
                             && payload.equals(expectedEvent.payload())
                             && timestamp.equals(expectedEvent.timestamp())
                             && isEqualOrdered(metadata, expectedMetadata);
@@ -247,7 +247,7 @@ abstract class KafkaStreamsEventStoreIT<K> {
                     // the expected metadata are sorted by key
                     var expectedMetadata = new TreeMap<>(expectedEvent.metadata());
 
-                    return key.equals(expectedEvent.key())
+                    return isEqual(key, expectedEvent.key())
                             && payload.equals(expectedEvent.payload())
                             && timestamp.equals(expectedEvent.timestamp())
                             && isEqualOrdered(metadata, expectedMetadata);
@@ -314,6 +314,14 @@ abstract class KafkaStreamsEventStoreIT<K> {
         }
 
         return true;
+    }
+
+    protected boolean isEqual(Object actual, Object expected) {
+        if (actual instanceof byte[] actualByteArray && expected instanceof byte[] expectedByteArray) {
+            return Arrays.equals(actualByteArray, expectedByteArray);
+        } else {
+            return actual.equals(expected);
+        }
     }
 
     protected abstract K getTestEventKey(int id);

@@ -90,7 +90,7 @@ class EventEncryptorIT {
     void encryptsPayloadAuthenticatedWithMetadata(byte[] payload, Object key, Instant timestamp,
             Map<String, Object> metadata) throws GeneralSecurityException {
         // Given
-        var encryptionKey = URI.create("test-kms://test-keys/" + key.toString());
+        var encryptionKey = URI.create("test-kms://test-keys/" + timestamp.toEpochMilli());
 
         testKms.putIfAbsent(encryptionKey, KeysetHandle.generateNew(AES256_GCM));
 
@@ -118,7 +118,7 @@ class EventEncryptorIT {
     void decryptsEncryptedPayloadAuthenticatedWithMetadata(byte[] payload, Object key, Instant timestamp,
             Map<String, Object> metadata) throws GeneralSecurityException {
         // Given
-        var encryptionKey = URI.create("test-kms://test-keys/" + key.toString());
+        var encryptionKey = URI.create("test-kms://test-keys/" + timestamp.toEpochMilli());
 
         testKms.putIfAbsent(encryptionKey, KeysetHandle.generateNew(AES256_GCM));
 
@@ -144,7 +144,7 @@ class EventEncryptorIT {
     void throwsExceptionWhenInvalidEncryptionKey(byte[] payload, Object key, Instant timestamp,
             Map<String, Object> metadata) throws GeneralSecurityException {
         // Given
-        var encryptionKey = URI.create("test-kms://test-keys/" + key.toString());
+        var encryptionKey = URI.create("test-kms://test-keys/" + timestamp.toEpochMilli());
         var invalidEncryptionKey = URI.create("test-kms://test-keys/invalid");
 
         testKms.putIfAbsent(encryptionKey, KeysetHandle.generateNew(AES256_GCM));
@@ -176,7 +176,7 @@ class EventEncryptorIT {
         // Given
         var invalidKey = UUID.randomUUID(); // use invalid key
 
-        var encryptionKey = URI.create("test-kms://test-keys/" + key.toString());
+        var encryptionKey = URI.create("test-kms://test-keys/" + timestamp.toEpochMilli());
 
         testKms.putIfAbsent(encryptionKey, KeysetHandle.generateNew(AES256_GCM));
 
@@ -204,7 +204,7 @@ class EventEncryptorIT {
     void ignoresSourceIdDuringDecryption(byte[] payload, Object key, Instant timestamp, Map<String, Object> metadata)
             throws GeneralSecurityException {
         // Given
-        var encryptionKey = URI.create("test-kms://test-keys/" + key.toString());
+        var encryptionKey = URI.create("test-kms://test-keys/" + timestamp.toEpochMilli());
 
         testKms.putIfAbsent(encryptionKey, KeysetHandle.generateNew(AES256_GCM));
 
@@ -250,6 +250,14 @@ class EventEncryptorIT {
                         named("test payload 2", "test payload 2".getBytes()),
                         UUID.fromString("23debd32-09cd-4a20-a403-c18793ecd2d2"),
                         Instant.ofEpochMilli(1734174935363l),
+                        Map.of(
+                                "dTest", "meta_value".getBytes(),
+                                "zTest", UUID.fromString("788ee0da-3ca9-4fa1-9d84-3470a067d695").toString().getBytes(),
+                                "bTest", "1".getBytes())),
+                arguments(
+                        named("test payload 3", "test payload 3".getBytes()),
+                        "test-event-3".getBytes(),
+                        Instant.ofEpochMilli(1734175935363l),
                         Map.of(
                                 "dTest", "meta_value".getBytes(),
                                 "zTest", UUID.fromString("788ee0da-3ca9-4fa1-9d84-3470a067d695").toString().getBytes(),

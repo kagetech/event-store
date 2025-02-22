@@ -94,10 +94,10 @@ class EventReplicatorIT {
     JdbcTemplate jdbcTemplate;
 
     @Autowired
-    KafkaTemplate<String, byte[]> kafkaTemplate;
+    KafkaTemplate<byte[], byte[]> kafkaTemplate;
 
     @Autowired
-    ConsumerFactory<String, byte[]> consumerFactory;
+    ConsumerFactory<byte[], byte[]> consumerFactory;
 
     @Autowired
     MeterRegistry meterRegistry;
@@ -171,7 +171,10 @@ class EventReplicatorIT {
         // store initial progress
         kafkaTemplate.executeInTransaction(kafkaTransaction -> {
             for (var topicEntry : topicLastIds.entrySet()) {
-                kafkaTransaction.send(PROGRESS_TOPIC, topicEntry.getKey(), longToBytes(topicEntry.getValue()));
+                kafkaTransaction.send(
+                        PROGRESS_TOPIC,
+                        stringToBytes(topicEntry.getKey()),
+                        longToBytes(topicEntry.getValue()));
             }
 
             return 0;
@@ -212,7 +215,7 @@ class EventReplicatorIT {
         // progress topic is filled
         kafkaTemplate.executeInTransaction(kafkaTransaction -> {
             for (var i = 0; i <= kafkaConsumerMaxPollRecords; i++) {
-                kafkaTransaction.send(PROGRESS_TOPIC, "test_topic", longToBytes(0l));
+                kafkaTransaction.send(PROGRESS_TOPIC, stringToBytes("test_topic"), longToBytes(0l));
             }
 
             return 0;
@@ -228,6 +231,10 @@ class EventReplicatorIT {
         assertThat(thrown.getMessage())
                 .describedAs("thrown exception")
                 .contains("kafkaConsumerMaxPollRecords");
+    }
+
+    private byte[] stringToBytes(String str) {
+        return str.getBytes(StandardCharsets.UTF_8);
     }
 
     private byte[] longToBytes(long val) {

@@ -83,10 +83,10 @@ abstract class EventReplicatorWorkerIT<K> {
     JdbcTemplate jdbcTemplate;
 
     @Autowired
-    KafkaTemplate<String, byte[]> kafkaTemplate;
+    KafkaTemplate<byte[], byte[]> kafkaTemplate;
 
     @Autowired
-    ConsumerFactory<String, byte[]> consumerFactory;
+    ConsumerFactory<byte[], byte[]> consumerFactory;
 
     @Autowired
     MeterRegistry meterRegistry;
@@ -154,7 +154,7 @@ abstract class EventReplicatorWorkerIT<K> {
                 .zipSatisfy(sourceEvents, (replicatedEvent, sourceEvent) -> {
                     assertThat(replicatedEvent.key())
                             .describedAs("replicated event key")
-                            .isEqualTo(sourceEvent.key().toString());
+                            .isEqualTo(keyToBytes(sourceEvent.key()));
 
                     assertThat(replicatedEvent.value())
                             .describedAs("replicated event data")
@@ -215,7 +215,7 @@ abstract class EventReplicatorWorkerIT<K> {
                 .zipSatisfy(sourceEvents, (replicatedEvent, sourceEvent) -> {
                     assertThat(replicatedEvent.key())
                             .describedAs("replicated event key")
-                            .isEqualTo(sourceEvent.key().toString());
+                            .isEqualTo(keyToBytes(sourceEvent.key()));
 
                     assertThat(replicatedEvent.value())
                             .describedAs("replicated event data")
@@ -278,7 +278,7 @@ abstract class EventReplicatorWorkerIT<K> {
                 .zipSatisfy(expectedEvents, (replicatedEvent, sourceEvent) -> {
                     assertThat(replicatedEvent.key())
                             .describedAs("replicated event key")
-                            .isEqualTo(sourceEvent.key().toString());
+                            .isEqualTo(keyToBytes(sourceEvent.key()));
 
                     assertThat(replicatedEvent.value())
                             .describedAs("replicated event data")
@@ -338,7 +338,7 @@ abstract class EventReplicatorWorkerIT<K> {
         var progressRecords = readRecordsFromKafka(PROGRESS_TOPIC);
 
         for (var consumerRecord : progressRecords) {
-            if (topic.contains(consumerRecord.key())) {
+            if (topic.contains(stringFromBytes(consumerRecord.key()))) {
                 storedLastId = longFromBytes(consumerRecord.value());
             }
         }
@@ -386,7 +386,7 @@ abstract class EventReplicatorWorkerIT<K> {
                         event.timestamp().atOffset(ZoneOffset.UTC));
     }
 
-    private ConsumerRecords<String, byte[]> readRecordsFromKafka(String topic) {
+    private ConsumerRecords<byte[], byte[]> readRecordsFromKafka(String topic) {
         try (var consumer = consumerFactory.createConsumer()) {
             var topicPartition = List.of(new TopicPartition(topic, 0));
 
@@ -395,6 +395,10 @@ abstract class EventReplicatorWorkerIT<K> {
 
             return consumer.poll(Duration.ofSeconds(60));
         }
+    }
+
+    private String stringFromBytes(byte[] bytes) {
+        return new String(bytes, StandardCharsets.UTF_8);
     }
 
     private long longFromBytes(byte[] bytes) {
@@ -419,7 +423,11 @@ abstract class EventReplicatorWorkerIT<K> {
 
     protected abstract String getKeyType();
 
-    protected abstract Object getTestEventKey(int id);
+    protected abstract K getTestEventKey(int id);
+
+    protected byte[] keyToBytes(Object key) {
+        return key.toString().getBytes();
+    }
 
     protected record EventData(long id, Object key, byte[] data, Map<String, Object> metadata, Instant timestamp) {
     }
