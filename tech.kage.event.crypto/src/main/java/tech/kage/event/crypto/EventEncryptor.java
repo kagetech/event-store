@@ -144,7 +144,7 @@ public class EventEncryptor {
     }
 
     byte[] prepareAssociatedData(Object key, Instant timestamp, byte[] metadata) {
-        var keyBytes = key.toString().getBytes(StandardCharsets.UTF_8);
+        var keyBytes = key instanceof byte[] byteArray ? byteArray : key.toString().getBytes(StandardCharsets.UTF_8);
 
         return ByteBuffer
                 .allocate(keyBytes.length + Long.BYTES + metadata.length) // 1 long for timestamp

@@ -227,7 +227,7 @@ abstract class PostgresEventStoreIT<K> {
                             ? MetadataSerializer.deserialize(metadata.array())
                             : Collections.<String, Object>emptySortedMap();
 
-                    return key.equals(expectedKey)
+                    return isEqual(key, expectedKey)
                             && payload.equals(expectedPayload)
                             && timestamp.equals(expectedTimestamp)
                             && isEqualOrdered(deserializedMetadata, expectedMetadata);
@@ -338,6 +338,14 @@ abstract class PostgresEventStoreIT<K> {
         }
 
         return true;
+    }
+
+    protected boolean isEqual(Object actual, Object expected) {
+        if (actual instanceof ByteBuffer actualByteBuffer && expected instanceof byte[] expectedByteArray) {
+            return Arrays.equals(actualByteBuffer.array(), expectedByteArray);
+        } else {
+            return actual.equals(expected);
+        }
     }
 
     protected abstract String getKeyType();

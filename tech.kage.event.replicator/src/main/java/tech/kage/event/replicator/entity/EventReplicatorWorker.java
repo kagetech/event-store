@@ -29,6 +29,7 @@ import static java.util.Comparator.comparing;
 import static tech.kage.event.EventStore.SOURCE_ID;
 
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.util.List;
 import java.util.Map;
@@ -90,7 +91,7 @@ class EventReplicatorWorker implements Runnable {
     private static final String MICROMETER_TAG_TOPIC = "topic";
 
     private final JdbcTemplate jdbcTemplate;
-    private final KafkaTemplate<String, byte[]> kafkaTemplate;
+    private final KafkaTemplate<byte[], byte[]> kafkaTemplate;
 
     private final String eventSchema;
     private final String replicatedTopic;
@@ -112,7 +113,7 @@ class EventReplicatorWorker implements Runnable {
      */
     EventReplicatorWorker(
             JdbcTemplate jdbcTemplate,
-            KafkaTemplate<String, byte[]> kafkaTemplate,
+            KafkaTemplate<byte[], byte[]> kafkaTemplate,
             MeterRegistry meterRegistry,
             Environment environment,
             String eventSchema,
@@ -185,14 +186,22 @@ class EventReplicatorWorker implements Runnable {
                 var headers = toHeaders(newLastId, metadata);
 
                 // send event to Kafka topic
-                kafka.send(new ProducerRecord<>(topic, null, timestamp.getTime(), key.toString(), data, headers));
+                kafka.send(new ProducerRecord<>(topic, null, timestamp.getTime(), serializeKey(key), data, headers));
             }
 
             // update progress topic
-            kafka.send(EventReplicator.PROGRESS_TOPIC, replicatedTopic, longToBytes(newLastId));
+            kafka.send(EventReplicator.PROGRESS_TOPIC, stringToBytes(replicatedTopic), longToBytes(newLastId));
 
             return newLastId;
         });
+    }
+
+    private byte[] serializeKey(Object key) {
+        if (key instanceof byte[] keyBytes) {
+            return keyBytes;
+        }
+
+        return stringToBytes(key.toString());
     }
 
     private List<Header> toHeaders(Long id, byte[] metadata) {
@@ -204,6 +213,10 @@ class EventReplicatorWorker implements Runnable {
                 .map(Header.class::cast)
                 .sorted(comparing(Header::key)) // sort again after adding the id header
                 .toList();
+    }
+
+    private byte[] stringToBytes(String str) {
+        return str.getBytes(StandardCharsets.UTF_8);
     }
 
     private byte[] longToBytes(long val) {

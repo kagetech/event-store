@@ -186,7 +186,7 @@ abstract class ReactorKafkaEventStoreIT<K> {
                     // the expected metadata are sorted by key
                     var expectedMetadata = new TreeMap<>(expectedEvent.metadata());
 
-                    return key.equals(expectedEvent.key())
+                    return isEqual(key, expectedEvent.key())
                             && payload.equals(expectedEvent.payload())
                             && timestamp.equals(expectedEvent.timestamp())
                             && isEqualOrdered(metadata, expectedMetadata);
@@ -252,7 +252,7 @@ abstract class ReactorKafkaEventStoreIT<K> {
                 .thenConsumeWhile(nextEvent -> {
                     var expectedEvent = expectedEventsIterator.next();
 
-                    return nextEvent.key().equals(expectedEvent.key())
+                    return isEqual(nextEvent.key(), expectedEvent.key())
                             && nextEvent.payload().equals(expectedEvent.payload())
                             && nextEvent.timestamp().equals(expectedEvent.timestamp())
                             && isEqual(nextEvent.metadata(), expectedEvent.metadata());
@@ -309,7 +309,7 @@ abstract class ReactorKafkaEventStoreIT<K> {
                 .thenConsumeWhile(nextEvent -> {
                     var expectedEvent = expectedEventsIterator.next();
 
-                    return nextEvent.key().equals(expectedEvent.key())
+                    return isEqual(nextEvent.key(), expectedEvent.key())
                             && nextEvent.payload().equals(expectedEvent.payload())
                             && nextEvent.timestamp().equals(expectedEvent.timestamp())
                             && isEqual(nextEvent.metadata(), expectedEvent.metadata());
@@ -396,6 +396,14 @@ abstract class ReactorKafkaEventStoreIT<K> {
         }
 
         return true;
+    }
+
+    protected boolean isEqual(Object actual, Object expected) {
+        if (actual instanceof byte[] actualByteArray && expected instanceof byte[] expectedByteArray) {
+            return Arrays.equals(actualByteArray, expectedByteArray);
+        } else {
+            return actual.equals(expected);
+        }
     }
 
     protected abstract K getTestEventKey(int id);

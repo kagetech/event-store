@@ -28,6 +28,7 @@ package tech.kage.event.replicator.entity;
 import static java.util.stream.Collectors.toList;
 
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
@@ -83,7 +84,7 @@ class EventReplicator {
      */
     private static final String NOOP_KEY = "noop";
 
-    private final KafkaTemplate<String, byte[]> kafkaTemplate;
+    private final KafkaTemplate<byte[], byte[]> kafkaTemplate;
     private final TaskScheduler taskScheduler;
 
     /**
@@ -107,7 +108,7 @@ class EventReplicator {
      * @param kafkaTemplate an instance of {@link KafkaTemplate}
      * @param taskScheduler an instance of {@link TaskScheduler}
      */
-    EventReplicator(KafkaTemplate<String, byte[]> kafkaTemplate, TaskScheduler taskScheduler) {
+    EventReplicator(KafkaTemplate<byte[], byte[]> kafkaTemplate, TaskScheduler taskScheduler) {
         this.kafkaTemplate = kafkaTemplate;
         this.taskScheduler = taskScheduler;
     }
@@ -129,7 +130,7 @@ class EventReplicator {
     void init(
             KafkaAdmin kafkaAdmin,
             JdbcTemplate jdbcTemplate,
-            ConsumerFactory<String, byte[]> consumerFactory,
+            ConsumerFactory<byte[], byte[]> consumerFactory,
             MeterRegistry meterRegistry,
             Environment environment,
             @Value("${event.replicator.poll.interval.ms:1000}") int pollInterval,
@@ -197,7 +198,7 @@ class EventReplicator {
      */
     private Map<String, Long> readLastIds(
             List<String> replicatedTopics,
-            ConsumerFactory<String, byte[]> consumerFactory) {
+            ConsumerFactory<byte[], byte[]> consumerFactory) {
         var lastIds = new HashMap<String, Long>();
 
         for (var topic : replicatedTopics) {
@@ -207,7 +208,7 @@ class EventReplicator {
         var topicPartition = List.of(new TopicPartition(PROGRESS_TOPIC, 0));
 
         // send noop so that we know there is something in PROGRESS_TOPIC
-        kafkaTemplate.executeInTransaction(kafka -> kafka.send(PROGRESS_TOPIC, NOOP_KEY, null));
+        kafkaTemplate.executeInTransaction(kafka -> kafka.send(PROGRESS_TOPIC, stringToBytes(NOOP_KEY), null));
 
         try (var consumer = consumerFactory.createConsumer()) {
             consumer.assign(topicPartition);
@@ -221,8 +222,10 @@ class EventReplicator {
             for (var consumerRecord : consumerRecords) {
                 consumerRecordsCount++;
 
-                if (replicatedTopics.contains(consumerRecord.key())) {
-                    lastIds.put(consumerRecord.key(), longFromBytes(consumerRecord.value()));
+                var topic = stringFromBytes(consumerRecord.key());
+
+                if (replicatedTopics.contains(topic)) {
+                    lastIds.put(topic, longFromBytes(consumerRecord.value()));
                 }
             }
 
@@ -234,6 +237,14 @@ class EventReplicator {
         }
 
         return lastIds;
+    }
+
+    private byte[] stringToBytes(String str) {
+        return str.getBytes(StandardCharsets.UTF_8);
+    }
+
+    private String stringFromBytes(byte[] bytes) {
+        return new String(bytes, StandardCharsets.UTF_8);
     }
 
     private long longFromBytes(byte[] bytes) {
