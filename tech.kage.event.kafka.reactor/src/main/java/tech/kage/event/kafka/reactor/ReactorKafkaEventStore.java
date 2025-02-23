@@ -89,6 +89,9 @@ import tech.kage.event.crypto.EventEncryptor;
  * and {@code spring.kafka.properties.schema.registry.url} points to a Confluent
  * Schema Registry instance.
  * 
+ * @param <K> the type of stored events' keys
+ * @param <V> the type of stored events' payloads
+ * 
  * @author Dariusz Szpakowski
  */
 @Component

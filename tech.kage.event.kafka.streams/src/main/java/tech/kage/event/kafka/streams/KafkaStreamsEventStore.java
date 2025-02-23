@@ -175,7 +175,7 @@ public class KafkaStreamsEventStore<K, V extends SpecificRecord> implements Even
      * Transformer of {@link Event} instances into Kafka Streams Records.
      */
     public class OutputEventTransformer extends ContextualFixedKeyProcessor<K, Event<K, V>, byte[]> {
-        private final String topic;
+        protected final String topic;
 
         OutputEventTransformer(String topic) {
             this.topic = topic;
@@ -184,6 +184,27 @@ public class KafkaStreamsEventStore<K, V extends SpecificRecord> implements Even
         @Override
         public void process(FixedKeyRecord<K, Event<K, V>> message) {
             context().forward(kafkaStreamsEventTransformer.transform(message.value(), message, topic));
+        }
+    }
+
+    /**
+     * Transformer of {@link Event} instances into encrypted Kafka Streams Records.
+     */
+    public class EncryptingOutputEventTransformer extends OutputEventTransformer {
+        EncryptingOutputEventTransformer(String topic) {
+            super(topic);
+        }
+
+        @Override
+        public void process(FixedKeyRecord<K, Event<K, V>> message) {
+            var encryptionKeyBytes = Objects.requireNonNull(
+                    (byte[]) message.value().metadata().get(ENCRYPTION_KEY_ID),
+                    "encryptionKey must not be null");
+
+            var encryptionKey = URI.create(new String(encryptionKeyBytes));
+
+            context().forward(
+                    kafkaStreamsEventTransformer.transform(message.value(), message, topic, encryptionKey));
         }
     }
 

@@ -26,12 +26,17 @@
 package tech.kage.event.kafka.streams;
 
 import static java.util.Comparator.comparing;
+import static java.util.stream.Collectors.toCollection;
+import static tech.kage.event.EventStore.ENCRYPTION_KEY_ID;
 
+import java.net.URI;
 import java.security.GeneralSecurityException;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.SequencedMap;
@@ -39,7 +44,6 @@ import java.util.SequencedMap;
 import org.apache.avro.specific.SpecificRecord;
 import org.apache.kafka.common.errors.SerializationException;
 import org.apache.kafka.common.header.Header;
-import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.header.internals.RecordHeader;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.serialization.Deserializer;
@@ -123,12 +127,45 @@ class KafkaStreamsEventTransformer<K, V extends SpecificRecord> {
      * @return transformed input {@link Event} into a {@link FixedKeyRecord}
      */
     FixedKeyRecord<K, byte[]> transform(Event<K, V> event, FixedKeyRecord<K, ?> message, String topic) {
+        return transform(event, message, topic, null);
+    }
+
+    /**
+     * Transforms the specified {@link Event} into an encrypted Kafka Streams
+     * {@link FixedKeyRecord}.
+     * 
+     * @param event         transformed event
+     * @param message       modified Kafka Streams message
+     * @param topic         topic associated with data
+     * @param encryptionKey encryption key to use
+     * 
+     * @return transformed input {@link Event} into a {@link FixedKeyRecord}
+     */
+    FixedKeyRecord<K, byte[]> transform(Event<K, V> event, FixedKeyRecord<K, ?> message, String topic,
+            URI encryptionKey) {
         var serializedPayload = kafkaAvroSerializer.serialize(topic, event.payload());
 
+        var metadataWithoutEncryptionKey = new HashMap<>(event.metadata());
+
+        metadataWithoutEncryptionKey.remove(ENCRYPTION_KEY_ID);
+
+        byte[] maybeEncryptedPayload;
+
+        if (encryptionKey != null) {
+            try {
+                maybeEncryptedPayload = eventEncryptor.encrypt(
+                        serializedPayload, event.key(), event.timestamp(), metadataWithoutEncryptionKey, encryptionKey);
+            } catch (GeneralSecurityException e) {
+                throw new SerializationException("Error encrypting event payload", e);
+            }
+        } else {
+            maybeEncryptedPayload = serializedPayload;
+        }
+
         return message
-                .withValue(serializedPayload)
+                .withValue(maybeEncryptedPayload)
                 .withTimestamp(event.timestamp().toEpochMilli())
-                .withHeaders(toHeaders(event.metadata()));
+                .withHeaders(new RecordHeaders(prepareHeaders(metadataWithoutEncryptionKey, encryptionKey)));
     }
 
     private SequencedMap<String, Object> toSequencedMap(Iterable<Header> headers) {
@@ -156,14 +193,25 @@ class KafkaStreamsEventTransformer<K, V extends SpecificRecord> {
         return Collections.unmodifiableMap(metadataMap);
     }
 
-    private Headers toHeaders(Map<String, Object> metadata) {
-        return new RecordHeaders(
-                metadata
-                        .entrySet()
-                        .stream()
-                        .map(e -> new RecordHeader(e.getKey(), (byte[]) e.getValue()))
-                        .map(Header.class::cast)
-                        .sorted(comparing(Header::key))
-                        .toList());
+    private List<Header> prepareHeaders(Map<String, Object> metadata, URI encryptionKey) {
+        if (metadata.isEmpty() && encryptionKey == null) {
+            return List.of();
+        }
+
+        var preparedHeaderList = metadata
+                .entrySet()
+                .stream()
+                .map(e -> new RecordHeader(e.getKey(), (byte[]) e.getValue()))
+                .map(Header.class::cast)
+                .collect(toCollection(ArrayList::new));
+
+        if (encryptionKey != null) {
+            preparedHeaderList.add(new RecordHeader(ENCRYPTION_KEY_ID, encryptionKey.toString().getBytes()));
+        }
+
+        return preparedHeaderList
+                .stream()
+                .sorted(comparing(Header::key))
+                .toList();
     }
 }

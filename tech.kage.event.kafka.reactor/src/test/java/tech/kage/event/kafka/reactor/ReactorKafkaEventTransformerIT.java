@@ -517,7 +517,8 @@ class ReactorKafkaEventTransformerIT {
         }
     }
 
-    private ReceiverRecord<Object, byte[]> encrypt(ReceiverRecord<Object, byte[]> receiverRecord, URI encryptionKey) {
+    private ReceiverRecord<Object, byte[]> encrypt(ReceiverRecord<Object, byte[]> receiverRecord, URI encryptionKey)
+            throws GeneralSecurityException {
         var metadata = new HashMap<String, Object>();
 
         for (var header : receiverRecord.headers()) {
@@ -534,8 +535,7 @@ class ReactorKafkaEventTransformerIT {
                         receiverRecord.key(),
                         Instant.ofEpochMilli(receiverRecord.timestamp()),
                         metadata,
-                        encryptionKey)
-                .block();
+                        encryptionKey);
 
         return receiverRecord(
                 receiverRecord.key(),

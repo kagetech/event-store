@@ -105,8 +105,8 @@ class ReactorKafkaEventTransformer {
                 .fromCallable(() -> kafkaAvroSerializer.serialize(topic, event.payload()))
                 .subscribeOn(Schedulers.boundedElastic())
                 .flatMap(serialized -> encryptionKey != null
-                        ? eventEncryptor.encrypt(
-                                serialized, event.key(), event.timestamp(), event.metadata(), encryptionKey)
+                        ? Mono.fromCallable(() -> eventEncryptor.encrypt(
+                                serialized, event.key(), event.timestamp(), event.metadata(), encryptionKey))
                         : Mono.just(serialized))
                 .map(serialized -> new ProducerRecord<Object, byte[]>(
                         topic,

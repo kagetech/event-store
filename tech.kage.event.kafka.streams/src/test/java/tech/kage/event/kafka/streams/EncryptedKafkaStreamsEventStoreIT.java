@@ -40,6 +40,8 @@ import java.util.UUID;
 
 import org.apache.avro.specific.SpecificRecord;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.serialization.Serdes;
+import org.apache.kafka.streams.kstream.Produced;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -73,6 +75,8 @@ class EncryptedKafkaStreamsEventStoreIT extends UUIDKeyKafkaStreamsEventStoreIT 
 
     static final String ENCRYPTED_TEST_EVENTS = "encrypted_test_events";
     static final String ENCRYPTED_TEST_EVENTS_IN = "encrypted_test_events_in";
+    static final String SECOND_ENCRYPTED_TEST_EVENTS_IN = "second_encrypted_test_events_in";
+    static final String ENCRYPTED_TEST_EVENTS_OUT = "encrypted_test_events_out";
     static final String UNENCRYPTED_TEST_EVENTS_OUT = "unencrypted_test_events_out";
 
     static final Map<URI, KeysetHandle> testKms = new HashMap<>();
@@ -83,12 +87,20 @@ class EncryptedKafkaStreamsEventStoreIT extends UUIDKeyKafkaStreamsEventStoreIT 
         void init(KafkaAdmin kafkaAdmin, KafkaStreamsEventStore<UUID, SpecificRecord> eventStore) {
             kafkaAdmin.createOrModifyTopics(TopicBuilder.name(ENCRYPTED_TEST_EVENTS).build());
             kafkaAdmin.createOrModifyTopics(TopicBuilder.name(ENCRYPTED_TEST_EVENTS_IN).build());
+            kafkaAdmin.createOrModifyTopics(TopicBuilder.name(SECOND_ENCRYPTED_TEST_EVENTS_IN).build());
             kafkaAdmin.createOrModifyTopics(TopicBuilder.name(UNENCRYPTED_TEST_EVENTS_OUT).build());
+            kafkaAdmin.createOrModifyTopics(TopicBuilder.name(ENCRYPTED_TEST_EVENTS_OUT).build());
 
             eventStore
                     .subscribe(ENCRYPTED_TEST_EVENTS_IN)
                     .mapValues(Event::payload)
                     .to(UNENCRYPTED_TEST_EVENTS_OUT);
+
+            eventStore
+                    .subscribe(SECOND_ENCRYPTED_TEST_EVENTS_IN)
+                    .mapValues(EncryptedKafkaStreamsEventStoreIT::fakeProcessing)
+                    .processValues(() -> eventStore.new EncryptingOutputEventTransformer(ENCRYPTED_TEST_EVENTS_OUT))
+                    .to(ENCRYPTED_TEST_EVENTS_OUT, Produced.valueSerde(Serdes.ByteArray()));
         }
     }
 
@@ -330,5 +342,93 @@ class EncryptedKafkaStreamsEventStoreIT extends UUIDKeyKafkaStreamsEventStoreIT 
                 })
                 .as("retrieves stored events with the same data")
                 .verifyComplete();
+    }
+
+    @Test
+    @Order(8)
+    void allowsEncryptingOutputEventStream() throws GeneralSecurityException {
+        // Given
+        var events = testEvents(10);
+
+        var keyMap = new HashMap<UUID, URI>();
+
+        for (var event : events) {
+            var encryptionKey = URI.create("test-kms://test-keys/" + event.key().toString());
+
+            keyMap.put(event.key(), encryptionKey);
+
+            testKms.putIfAbsent(encryptionKey, KeysetHandle.generateNew(PredefinedAeadParameters.AES256_GCM));
+        }
+
+        var savedEvents = Flux.concat(
+                events
+                        .stream()
+                        .map(event -> eventStore.save(SECOND_ENCRYPTED_TEST_EVENTS_IN, event, keyMap.get(event.key())))
+                        .toList());
+
+        var expectedEventsIterator = events.iterator();
+
+        // When
+        // topology specified in the bean init method
+
+        // Then
+        var retrievedEvents = KafkaReceiver
+                .create(kafkaReceiverOptions.assignment(List.of(new TopicPartition(ENCRYPTED_TEST_EVENTS_OUT, 0))))
+                .receive()
+                .take(events.size())
+                .timeout(Duration.ofSeconds(60));
+
+        StepVerifier
+                .create(savedEvents.thenMany(retrievedEvents))
+                .thenConsumeWhile(message -> {
+                    var key = message.key();
+                    var encryptedPayload = message.value();
+                    var timestamp = Instant.ofEpochMilli(message.timestamp());
+                    var metadata = toSequencedMap(message.headers());
+                    var encryptionKey = keyMap.get(key).toString().getBytes();
+
+                    byte[] decryptedPayload;
+
+                    try {
+                        decryptedPayload = eventEncryptor.decrypt(encryptedPayload, key, timestamp, metadata);
+                    } catch (GeneralSecurityException e) {
+                        throw new AssertionError("Unable to decrypt event payload", e);
+                    }
+
+                    var deserializedPayload = kafkaAvroDeserializer.deserialize(null, decryptedPayload);
+
+                    var expectedEvent = expectedEventAfterFakeProcessing(expectedEventsIterator.next(), encryptionKey);
+
+                    // the expected metadata are sorted by key
+                    var expectedMetadata = new TreeMap<>(expectedEvent.metadata());
+
+                    return key.equals(expectedEvent.key())
+                            && deserializedPayload.equals(expectedEvent.payload())
+                            && timestamp.equals(expectedEvent.timestamp())
+                            && isEqualOrdered(metadata, expectedMetadata);
+                })
+                .as("retrieves stored encrypted events with the same data")
+                .verifyComplete();
+    }
+
+    private static Event<UUID, SpecificRecord> fakeProcessing(Event<UUID, SpecificRecord> event) {
+        return Event.from(
+                event.key(),
+                TestPayload.newBuilder().setText(((TestPayload) event.payload()).getText() + " (processed)").build(),
+                event.timestamp().plusSeconds(3),
+                Map.of(
+                        ENCRYPTION_KEY_ID, event.metadata().get("header.kid"),
+                        "dTest", event.metadata().get("header.dTest")));
+    }
+
+    private Event<UUID, SpecificRecord> expectedEventAfterFakeProcessing(Event<UUID, SpecificRecord> event,
+            byte[] encryptionKey) {
+        return Event.from(
+                event.key(),
+                TestPayload.newBuilder().setText(((TestPayload) event.payload()).getText() + " (processed)").build(),
+                event.timestamp().plusSeconds(3),
+                Map.of(
+                        ENCRYPTION_KEY_ID, encryptionKey,
+                        "dTest", event.metadata().get("dTest")));
     }
 }
