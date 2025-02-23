@@ -42,6 +42,8 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.Deserializer;
+import org.apache.kafka.common.serialization.Serdes;
+import org.apache.kafka.streams.kstream.Produced;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -135,8 +137,9 @@ abstract class KafkaStreamsEventStoreIT<K> {
 
             eventStore
                     .subscribe(TEST_EVENTS_IN)
-                    .mapValues(Event::payload)
-                    .to(TEST_EVENTS_OUT);
+                    .mapValues(KafkaStreamsEventStoreIT::fakeProcessing)
+                    .processValues(() -> eventStore.new OutputEventTransformer(TEST_EVENTS_OUT))
+                    .to(TEST_EVENTS_OUT, Produced.valueSerde(Serdes.ByteArray()));
         }
     }
 
@@ -242,7 +245,7 @@ abstract class KafkaStreamsEventStoreIT<K> {
                     var timestamp = Instant.ofEpochMilli(message.timestamp());
                     var metadata = toSequencedMap(message.headers());
 
-                    var expectedEvent = expectedEventsIterator.next();
+                    var expectedEvent = expectedEventAfterFakeProcessing(expectedEventsIterator.next());
 
                     // the expected metadata are sorted by key
                     var expectedMetadata = new TreeMap<>(expectedEvent.metadata());
@@ -325,4 +328,20 @@ abstract class KafkaStreamsEventStoreIT<K> {
     }
 
     protected abstract K getTestEventKey(int id);
+
+    private static Event<Object, SpecificRecord> fakeProcessing(Event<Object, SpecificRecord> event) {
+        return Event.from(
+                event.key(),
+                TestPayload.newBuilder().setText(((TestPayload) event.payload()).getText() + " (processed)").build(),
+                event.timestamp().plusSeconds(3),
+                Map.of("dTest", event.metadata().get("header.dTest")));
+    }
+
+    private Event<K, SpecificRecord> expectedEventAfterFakeProcessing(Event<K, SpecificRecord> event) {
+        return Event.from(
+                event.key(),
+                TestPayload.newBuilder().setText(((TestPayload) event.payload()).getText() + " (processed)").build(),
+                event.timestamp().plusSeconds(3),
+                Map.of("dTest", event.metadata().get("dTest")));
+    }
 }

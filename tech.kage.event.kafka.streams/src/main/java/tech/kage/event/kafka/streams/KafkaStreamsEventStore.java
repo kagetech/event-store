@@ -82,6 +82,9 @@ import tech.kage.event.crypto.EventEncryptor;
  * cluster and {@code spring.kafka.properties.schema.registry.url} points to a
  * Confluent Schema Registry instance.
  * 
+ * @param <K> the type of stored events' keys
+ * @param <V> the type of stored events' payloads
+ * 
  * @author Dariusz Szpakowski
  */
 @Component
@@ -153,18 +156,34 @@ public class KafkaStreamsEventStore<K, V extends SpecificRecord> implements Even
                 topic,
                 key -> streamsBuilder
                         .stream(topic, Consumed.<K, byte[]>as(topic + "-input").withValueSerde(Serdes.ByteArray()))
-                        .processValues(EventTransformer::new, Named.as(topic + "-event_transformer")));
+                        .processValues(InputEventTransformer::new, Named.as(topic + "-input_event_transformer")));
     }
 
     /**
      * Transformer of Kafka Streams Records into {@link Event} instances.
      */
-    class EventTransformer extends ContextualFixedKeyProcessor<K, byte[], Event<K, V>> {
+    class InputEventTransformer extends ContextualFixedKeyProcessor<K, byte[], Event<K, V>> {
         @Override
         public void process(FixedKeyRecord<K, byte[]> message) {
             context().forward(
                     message.withValue(
                             kafkaStreamsEventTransformer.transform(message, context().recordMetadata())));
+        }
+    }
+
+    /**
+     * Transformer of {@link Event} instances into Kafka Streams Records.
+     */
+    public class OutputEventTransformer extends ContextualFixedKeyProcessor<K, Event<K, V>, byte[]> {
+        private final String topic;
+
+        OutputEventTransformer(String topic) {
+            this.topic = topic;
+        }
+
+        @Override
+        public void process(FixedKeyRecord<K, Event<K, V>> message) {
+            context().forward(kafkaStreamsEventTransformer.transform(message.value(), message, topic));
         }
     }
 

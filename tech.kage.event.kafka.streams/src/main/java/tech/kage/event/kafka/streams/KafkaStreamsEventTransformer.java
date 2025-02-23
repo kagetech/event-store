@@ -25,6 +25,8 @@
 
 package tech.kage.event.kafka.streams;
 
+import static java.util.Comparator.comparing;
+
 import java.security.GeneralSecurityException;
 import java.time.Instant;
 import java.util.Collections;
@@ -37,7 +39,11 @@ import java.util.SequencedMap;
 import org.apache.avro.specific.SpecificRecord;
 import org.apache.kafka.common.errors.SerializationException;
 import org.apache.kafka.common.header.Header;
+import org.apache.kafka.common.header.Headers;
+import org.apache.kafka.common.header.internals.RecordHeader;
+import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.serialization.Deserializer;
+import org.apache.kafka.common.serialization.Serializer;
 import org.apache.kafka.streams.processor.api.FixedKeyRecord;
 import org.apache.kafka.streams.processor.api.RecordMetadata;
 import org.springframework.stereotype.Component;
@@ -56,16 +62,22 @@ class KafkaStreamsEventTransformer<K, V extends SpecificRecord> {
     private static final String METADATA_OFFSET = "offset";
     private static final String METADATA_HEADER_PREFIX = "header.";
 
+    private final Serializer<SpecificRecord> kafkaAvroSerializer;
     private final Deserializer<V> kafkaAvroDeserializer;
     private final EventEncryptor eventEncryptor;
 
     /**
      * Constructs a new {@link KafkaStreamsEventTransformer} instance.
      *
+     * @param kafkaAvroSerializer   an instance of {@link Serializer}
      * @param kafkaAvroDeserializer an instance of {@link Deserializer}
      * @param eventEncryptor        an instance of {@link EventEncryptor}
      */
-    KafkaStreamsEventTransformer(Deserializer<V> kafkaAvroDeserializer, EventEncryptor eventEncryptor) {
+    KafkaStreamsEventTransformer(
+            Serializer<SpecificRecord> kafkaAvroSerializer,
+            Deserializer<V> kafkaAvroDeserializer,
+            EventEncryptor eventEncryptor) {
+        this.kafkaAvroSerializer = kafkaAvroSerializer;
         this.kafkaAvroDeserializer = kafkaAvroDeserializer;
         this.eventEncryptor = eventEncryptor;
     }
@@ -100,6 +112,25 @@ class KafkaStreamsEventTransformer<K, V extends SpecificRecord> {
         return Event.from(key, deserializedPayload, timestamp, metadata(message, recordMetadata));
     }
 
+    /**
+     * Transforms the specified {@link Event} into a Kafka Streams
+     * {@link FixedKeyRecord}.
+     * 
+     * @param event   transformed event
+     * @param message modified Kafka Streams message
+     * @param topic   topic associated with data
+     * 
+     * @return transformed input {@link Event} into a {@link FixedKeyRecord}
+     */
+    FixedKeyRecord<K, byte[]> transform(Event<K, V> event, FixedKeyRecord<K, ?> message, String topic) {
+        var serializedPayload = kafkaAvroSerializer.serialize(topic, event.payload());
+
+        return message
+                .withValue(serializedPayload)
+                .withTimestamp(event.timestamp().toEpochMilli())
+                .withHeaders(toHeaders(event.metadata()));
+    }
+
     private SequencedMap<String, Object> toSequencedMap(Iterable<Header> headers) {
         var associatedMetadata = new LinkedHashMap<String, Object>();
 
@@ -123,5 +154,16 @@ class KafkaStreamsEventTransformer<K, V extends SpecificRecord> {
         }
 
         return Collections.unmodifiableMap(metadataMap);
+    }
+
+    private Headers toHeaders(Map<String, Object> metadata) {
+        return new RecordHeaders(
+                metadata
+                        .entrySet()
+                        .stream()
+                        .map(e -> new RecordHeader(e.getKey(), (byte[]) e.getValue()))
+                        .map(Header.class::cast)
+                        .sorted(comparing(Header::key))
+                        .toList());
     }
 }
