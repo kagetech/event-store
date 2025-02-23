@@ -43,7 +43,6 @@ import org.springframework.stereotype.Component;
 import com.google.crypto.tink.Aead;
 import com.google.crypto.tink.aead.AeadConfig;
 
-import reactor.core.publisher.Mono;
 import tech.kage.event.Event;
 
 /**
@@ -80,21 +79,21 @@ public class EventEncryptor {
      * 
      * @return encrypted {@code Event}'s payload
      * 
-     * @throws NullPointerException if the specified payload, key, timestamp,
-     *                              metadata or encryptionKey is null
+     * @throws NullPointerException     if the specified payload, key, timestamp,
+     *                                  metadata or encryptionKey is null
+     * @throws GeneralSecurityException if encryption fails
      */
-    public Mono<byte[]> encrypt(byte[] payload, Object key, Instant timestamp, Map<String, Object> metadata,
-            URI encryptionKey) {
+    public byte[] encrypt(byte[] payload, Object key, Instant timestamp, Map<String, Object> metadata,
+            URI encryptionKey) throws GeneralSecurityException {
         Objects.requireNonNull(payload, "payload must not be null");
         Objects.requireNonNull(key, "key must not be null");
         Objects.requireNonNull(timestamp, "timestamp must not be null");
         Objects.requireNonNull(metadata, "metadata must not be null");
         Objects.requireNonNull(encryptionKey, "encryptionKey must not be null");
 
-        return Mono.fromCallable(
-                () -> aeadProvider
-                        .getObject(encryptionKey)
-                        .encrypt(payload, prepareAssociatedData(key, timestamp, metadata)));
+        return aeadProvider
+                .getObject(encryptionKey)
+                .encrypt(payload, prepareAssociatedData(key, timestamp, metadata));
     }
 
     /**

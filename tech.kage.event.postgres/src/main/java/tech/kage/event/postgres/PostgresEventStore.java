@@ -127,8 +127,8 @@ public class PostgresEventStore<K, V extends SpecificRecord> implements EventSto
                 .fromCallable(() -> kafkaAvroSerializer.serialize(topic, event.payload()))
                 .subscribeOn(Schedulers.boundedElastic())
                 .flatMap(serialized -> encryptionKey != null
-                        ? eventEncryptor.encrypt(
-                                serialized, event.key(), event.timestamp(), event.metadata(), encryptionKey)
+                        ? Mono.fromCallable(() -> eventEncryptor.encrypt(
+                                serialized, event.key(), event.timestamp(), event.metadata(), encryptionKey))
                         : Mono.just(serialized))
                 .flatMap(serialized -> databaseClient
                         .sql(event.metadata().isEmpty() && encryptionKey == null

@@ -101,9 +101,7 @@ class EventEncryptorIT {
         var associatedData = eventEncryptor.prepareAssociatedData(key, timestamp, serializedMetadata);
 
         // When
-        var encryptedPayload = eventEncryptor
-                .encrypt(payload, key, timestamp, metadata, encryptionKey)
-                .block();
+        var encryptedPayload = eventEncryptor.encrypt(payload, key, timestamp, metadata, encryptionKey);
 
         // Then
         var decryptedPayload = aead.decrypt(encryptedPayload, associatedData);
@@ -126,9 +124,7 @@ class EventEncryptorIT {
 
         metadataWithEncryptionKey.put(ENCRYPTION_KEY_ID, encryptionKey.toString().getBytes());
 
-        var encryptedPayload = eventEncryptor
-                .encrypt(payload, key, timestamp, metadata, encryptionKey)
-                .block();
+        var encryptedPayload = eventEncryptor.encrypt(payload, key, timestamp, metadata, encryptionKey);
 
         // When
         var decryptedPayload = eventEncryptor.decrypt(encryptedPayload, key, timestamp, metadataWithEncryptionKey);
@@ -154,9 +150,7 @@ class EventEncryptorIT {
 
         metadataWithInvalidKey.put(ENCRYPTION_KEY_ID, invalidEncryptionKey.toString().getBytes());
 
-        var encryptedPayload = eventEncryptor
-                .encrypt(payload, key, timestamp, metadata, encryptionKey)
-                .block();
+        var encryptedPayload = eventEncryptor.encrypt(payload, key, timestamp, metadata, encryptionKey);
 
         // When
         var thrown = assertThrows(Throwable.class,
@@ -184,9 +178,7 @@ class EventEncryptorIT {
 
         metadataWithInvalidKey.put(ENCRYPTION_KEY_ID, encryptionKey.toString().getBytes());
 
-        var encryptedPayload = eventEncryptor
-                .encrypt(payload, key, timestamp, metadata, encryptionKey)
-                .block();
+        var encryptedPayload = eventEncryptor.encrypt(payload, key, timestamp, metadata, encryptionKey);
 
         // When
         var thrown = assertThrows(Throwable.class,
@@ -213,9 +205,7 @@ class EventEncryptorIT {
         metadataWithSourceId.put(ENCRYPTION_KEY_ID, encryptionKey.toString().getBytes());
         metadataWithSourceId.put(SOURCE_ID, "123".getBytes());
 
-        var encryptedPayload = eventEncryptor
-                .encrypt(payload, key, timestamp, metadata, encryptionKey)
-                .block();
+        var encryptedPayload = eventEncryptor.encrypt(payload, key, timestamp, metadata, encryptionKey);
 
         // When
         var decryptedPayload = eventEncryptor.decrypt(encryptedPayload, key, timestamp, metadataWithSourceId);

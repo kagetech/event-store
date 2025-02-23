@@ -26,6 +26,7 @@
 package tech.kage.event.kafka.streams;
 
 import static com.google.crypto.tink.aead.PredefinedAeadParameters.AES256_GCM;
+import static java.util.Comparator.comparing;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Named.named;
@@ -41,6 +42,8 @@ import java.io.UncheckedIOException;
 import java.net.URI;
 import java.security.GeneralSecurityException;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -285,6 +288,57 @@ class KafkaStreamsEventTransformerIT {
                 .isEqualTo(expectedRecord.headers());
     }
 
+    @ParameterizedTest
+    @MethodSource("testEvents")
+    void encryptsAndTransformsEventIntoMessage(Event<Object, SpecificRecord> event,
+            FixedKeyRecord<?, byte[]> expectedRecord) throws GeneralSecurityException {
+        // Given
+        var encryptionKey = URI.create("test-kms://test-keys/" + event.key().toString());
+
+        testKms.putIfAbsent(encryptionKey, KeysetHandle.generateNew(AES256_GCM));
+
+        var metadataWithEncryptionKey = new HashMap<>(event.metadata());
+        metadataWithEncryptionKey.put(ENCRYPTION_KEY_ID, encryptionKey.toString().getBytes());
+
+        var expectedHeaderList = new ArrayList<Header>();
+
+        for (var header : expectedRecord.headers()) {
+            expectedHeaderList.add(header);
+        }
+
+        expectedHeaderList.add(new RecordHeader(ENCRYPTION_KEY_ID, encryptionKey.toString().getBytes()));
+
+        Collections.sort(expectedHeaderList, comparing(Header::key));
+
+        var expectedHeaders = new RecordHeaders(expectedHeaderList);
+
+        // When
+        var transformedRecord = eventTransformer.transform(event, message(event.key()), TEST_EVENTS, encryptionKey);
+
+        // Then
+        assertThat(transformedRecord.key())
+                .describedAs("transformed record key")
+                .isEqualTo(expectedRecord.key());
+
+        var decryptedTransformedRecordValue = eventEncryptor.decrypt(
+                transformedRecord.value(),
+                event.key(),
+                event.timestamp(),
+                metadataWithEncryptionKey);
+
+        assertThat(decryptedTransformedRecordValue)
+                .describedAs("decrypted transformed record value")
+                .isEqualTo(expectedRecord.value());
+
+        assertThat(transformedRecord.timestamp())
+                .describedAs("transformed record timestamp")
+                .isEqualTo(expectedRecord.timestamp());
+
+        assertThat(transformedRecord.headers())
+                .describedAs("transformed record headers")
+                .isEqualTo(expectedHeaders);
+    }
+
     static Stream<Arguments> testMessages() {
         return Stream.of(
                 arguments(
@@ -486,7 +540,8 @@ class KafkaStreamsEventTransformerIT {
         }
     }
 
-    private FixedKeyRecord<Object, byte[]> encrypt(FixedKeyRecord<Object, byte[]> message, URI encryptionKey) {
+    private FixedKeyRecord<Object, byte[]> encrypt(FixedKeyRecord<Object, byte[]> message, URI encryptionKey)
+            throws GeneralSecurityException {
         var metadata = new HashMap<String, Object>();
 
         for (var header : message.headers()) {
@@ -503,8 +558,7 @@ class KafkaStreamsEventTransformerIT {
                         message.key(),
                         Instant.ofEpochMilli(message.timestamp()),
                         metadata,
-                        encryptionKey)
-                .block();
+                        encryptionKey);
 
         return message(message.key(), encryptedReceiverRecordValue, message.timestamp(), message.headers());
     }
