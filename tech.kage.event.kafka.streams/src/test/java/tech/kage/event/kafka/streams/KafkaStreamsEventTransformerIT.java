@@ -59,6 +59,7 @@ import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.header.internals.RecordHeader;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.serialization.Deserializer;
+import org.apache.kafka.common.serialization.Serializer;
 import org.apache.kafka.streams.processor.api.FixedKeyRecord;
 import org.apache.kafka.streams.processor.api.RecordMetadata;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -97,7 +98,21 @@ class KafkaStreamsEventTransformerIT {
     EventEncryptor eventEncryptor;
 
     @TestBean
+    Serializer<SpecificRecord> kafkaAvroSerializer;
+
+    @TestBean
     Deserializer<SpecificRecord> kafkaAvroDeserializer;
+
+    static final String TEST_EVENTS = "test_events";
+
+    static Serializer<SpecificRecord> kafkaAvroSerializer() {
+        return new Serializer<>() {
+            @Override
+            public byte[] serialize(String topic, SpecificRecord data) {
+                return KafkaStreamsEventTransformerIT.serialize(data);
+            }
+        };
+    }
 
     static Deserializer<SpecificRecord> kafkaAvroDeserializer() {
         return new Deserializer<>() {
@@ -246,6 +261,30 @@ class KafkaStreamsEventTransformerIT {
                 .hasRootCauseMessage("decryption failed");
     }
 
+    @ParameterizedTest
+    @MethodSource("testEvents")
+    void transformsEventIntoMessage(Event<Object, SpecificRecord> event, FixedKeyRecord<?, byte[]> expectedRecord) {
+        // When
+        var transformedRecord = eventTransformer.transform(event, message(event.key()), TEST_EVENTS);
+
+        // Then
+        assertThat(transformedRecord.key())
+                .describedAs("transformed record key")
+                .isEqualTo(expectedRecord.key());
+
+        assertThat(transformedRecord.value())
+                .describedAs("transformed record value")
+                .isEqualTo(expectedRecord.value());
+
+        assertThat(transformedRecord.timestamp())
+                .describedAs("transformed record timestamp")
+                .isEqualTo(expectedRecord.timestamp());
+
+        assertThat(transformedRecord.headers())
+                .describedAs("transformed record headers")
+                .isEqualTo(expectedRecord.headers());
+    }
+
     static Stream<Arguments> testMessages() {
         return Stream.of(
                 arguments(
@@ -354,6 +393,56 @@ class KafkaStreamsEventTransformerIT {
                                                         .getBytes())))));
     }
 
+    static Stream<Arguments> testEvents() {
+        return Stream.of(
+                arguments(
+                        named(
+                                "event without headers with UUID key",
+                                Event.from(
+                                        UUID.fromString("bb15137d-8f16-4a19-a023-6845b9d1bead"),
+                                        TestPayload.newBuilder().setText("test payload 1").build(),
+                                        Instant.ofEpochMilli(1734149827923l),
+                                        Map.of())),
+                        named(
+                                "producerRecord without headers with UUID key",
+                                message(
+                                        UUID.fromString("bb15137d-8f16-4a19-a023-6845b9d1bead"),
+                                        serialize(TestPayload.newBuilder().setText("test payload 1").build()),
+                                        1734149827923l,
+                                        List.of()))),
+                arguments(
+                        named(
+                                "event with headers with String key",
+                                Event.from(
+                                        "test-event-2",
+                                        TestPayload.newBuilder().setText("test payload 2").build(),
+                                        Instant.ofEpochMilli(1734174935363l),
+                                        Map.of(
+                                                "dTest", "meta_value".getBytes(),
+                                                "zTest",
+                                                UUID.fromString("788ee0da-3ca9-4fa1-9d84-3470a067d695")
+                                                        .toString()
+                                                        .getBytes(),
+                                                "bTest", "1".getBytes()))),
+                        named(
+                                "producerRecord with headers with String key",
+                                message(
+                                        "test-event-2",
+                                        serialize(TestPayload.newBuilder().setText("test payload 2").build()),
+                                        1734174935363l,
+                                        List.of(
+                                                new RecordHeader("bTest", "1".getBytes()),
+                                                new RecordHeader("dTest", "meta_value".getBytes()),
+                                                new RecordHeader("zTest",
+                                                        UUID.fromString("788ee0da-3ca9-4fa1-9d84-3470a067d695")
+                                                                .toString()
+                                                                .getBytes()))))));
+    }
+
+    private FixedKeyRecord<Object, ?> message(Object key) {
+        return message(key, null, 0, (Headers) null);
+    }
+
     private static FixedKeyRecord<Object, byte[]> message(
             Object key,
             byte[] payload,
@@ -363,15 +452,17 @@ class KafkaStreamsEventTransformerIT {
     }
 
     @SuppressWarnings("unchecked")
-    private static FixedKeyRecord<Object, byte[]> message(Object key, byte[] payload, long timestamp, Headers headers) {
-        var message = Mockito.mock(FixedKeyRecord.class);
+    private static <V> FixedKeyRecord<Object, V> message(Object key, V payload, long timestamp, Headers headers) {
+        try {
+            var ctor = FixedKeyRecord.class.getDeclaredConstructor(Object.class, Object.class, long.class,
+                    Headers.class);
 
-        given(message.key()).willReturn(key);
-        given(message.value()).willReturn(payload);
-        given(message.timestamp()).willReturn(timestamp);
-        given(message.headers()).willReturn(headers);
+            ctor.setAccessible(true);
 
-        return message;
+            return (FixedKeyRecord<Object, V>) ctor.newInstance(key, payload, timestamp, headers);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Unable to instantiate FixedKeyRecord", e);
+        }
     }
 
     private static Optional<RecordMetadata> recordMetadata(int partition, long offset) {
