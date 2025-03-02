@@ -28,13 +28,13 @@ CREATE TABLE IF NOT EXISTS events.topic_offsets (
 <dependency>
     <groupId>tech.kage.event</groupId>
     <artifactId>tech.kage.event</artifactId>
-    <version>1.2.0</version>
+    <version>1.3.0</version>
 </dependency>
 
 <dependency>
     <groupId>tech.kage.event</groupId>
     <artifactId>tech.kage.event.kafka.reactor</artifactId>
-    <version>1.2.0</version>
+    <version>1.3.0</version>
 </dependency>
 ```
 
@@ -70,7 +70,7 @@ spring.kafka.consumer.group-id=sample-projection
 
 ```java
 @Autowired
-EventStore eventStore;
+EventStore<UUID, TestPayload> eventStore;
 
 var key = UUID.randomUUID();
 var payload = TestPayload.newBuilder().setText("sample payload").build();
@@ -79,11 +79,28 @@ var event = Event.from(key, payload);
 eventStore.save("sample_topic", event);
 ```
 
+**Save an encrypted event**
+
+```java
+// configure com.google.crypto.tink.Aead bean
+@Bean
+@Scope(SCOPE_PROTOTYPE)
+Aead aead(URI encryptionKey) throws GeneralSecurityException {
+    KmsClient kmsClient = ... // configure com.google.crypto.tink.KmsClient
+
+    return kmsClient.get(encryptionKey).getPrimitive(RegistryConfiguration.get(), Aead.class);
+}
+
+var encryptionKey = URI.create("test-kms://test-keys/" + key.toString());
+
+eventStore.save("sample_encrypted_topic", event, encryptionKey);
+```
+
 **Subscribe to an event stream**
 
 ```java
 @Autowired
-ReactorKafkaEventStore eventStore;
+ReactorKafkaEventStore<UUID, SpecificRecord> eventStore;
 
 @Autowired
 ReactiveTransactionManager transactionManager

@@ -34,7 +34,6 @@ import reactor.core.publisher.Mono;
 /**
  * A database focused on storing events.
  * 
- * 
  * @param <K> the type of stored events' keys
  * @param <V> the type of stored events' payloads
  * 

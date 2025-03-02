@@ -14,13 +14,13 @@ Uses [Apache Avro](https://avro.apache.org/) for payload serialization and store
 <dependency>
     <groupId>tech.kage.event</groupId>
     <artifactId>tech.kage.event</artifactId>
-    <version>1.2.0</version>
+    <version>1.3.0</version>
 </dependency>
 
 <dependency>
     <groupId>tech.kage.event</groupId>
     <artifactId>tech.kage.event.kafka.streams</artifactId>
-    <version>1.2.0</version>
+    <version>1.3.0</version>
 </dependency>
 ```
 
@@ -54,7 +54,7 @@ kafka.streams.application.id=sample-kafka-streams-event-store
 
 ```java
 @Autowired
-EventStore eventStore;
+EventStore<UUID, TestPayload> eventStore;
 
 var key = UUID.randomUUID();
 var payload = TestPayload.newBuilder().setText("sample payload").build();
@@ -63,15 +63,42 @@ var event = Event.from(key, payload);
 eventStore.save("sample_topic", event);
 ```
 
+**Save an encrypted event**
+
+```java
+// configure com.google.crypto.tink.Aead bean
+@Bean
+@Scope(SCOPE_PROTOTYPE)
+Aead aead(URI encryptionKey) throws GeneralSecurityException {
+    KmsClient kmsClient = ... // configure com.google.crypto.tink.KmsClient
+
+    return kmsClient.get(encryptionKey).getPrimitive(RegistryConfiguration.get(), Aead.class);
+}
+
+var encryptionKey = URI.create("test-kms://test-keys/" + key.toString());
+
+eventStore.save("sample_encrypted_topic", event, encryptionKey);
+```
+
 **Subscribe to an event stream**
 
 ```java
 @Autowired
-KafkaStreamsEventStore eventStore;
+KafkaStreamsEventStore<UUID, SpecificRecord> eventStore;
 
 eventStore
         .subscribe("sample_topic")
         ...
+```
+
+**Encrypt output events**
+
+```java
+eventStore
+    .subscribe("input-topic")
+    .mapValues(...) // set EventStore.ENCRYPTION_KEY_ID header
+    .processValues(() -> eventStore.new EncryptingOutputEventTransformer("encrypted-output-topic"))
+    .to("encrypted-output-topic", Produced.valueSerde(Serdes.ByteArray()));
 ```
 
 ## Examples
