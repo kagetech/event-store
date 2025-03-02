@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS events.test_events (
     id bigserial PRIMARY KEY,
     key uuid NOT NULL,
     data bytea NOT NULL,
+    metadata bytea,
     timestamp timestamp with time zone NOT NULL
 );
 ```
@@ -27,13 +28,13 @@ CREATE TABLE IF NOT EXISTS events.test_events (
 <dependency>
     <groupId>tech.kage.event</groupId>
     <artifactId>tech.kage.event</artifactId>
-    <version>1.2.0</version>
+    <version>1.3.0</version>
 </dependency>
 
 <dependency>
     <groupId>tech.kage.event</groupId>
     <artifactId>tech.kage.event.postgres</artifactId>
-    <version>1.2.0</version>
+    <version>1.3.0</version>
 </dependency>
 ```
 
@@ -64,13 +65,30 @@ schema.registry.url=http://localhost:8989
 
 ```java
 @Autowired
-EventStore eventStore;
+EventStore<UUID, TestPayload> eventStore;
 
 var key = UUID.randomUUID();
 var payload = TestPayload.newBuilder().setText("sample payload").build();
 var event = Event.from(key, payload);
 
 eventStore.save("sample_topic", event);
+```
+
+**Save an encrypted event**
+
+```java
+// configure com.google.crypto.tink.Aead bean
+@Bean
+@Scope(SCOPE_PROTOTYPE)
+Aead aead(URI encryptionKey) throws GeneralSecurityException {
+    KmsClient kmsClient = ... // configure com.google.crypto.tink.KmsClient
+
+    return kmsClient.get(encryptionKey).getPrimitive(RegistryConfiguration.get(), Aead.class);
+}
+
+var encryptionKey = URI.create("test-kms://test-keys/" + key.toString());
+
+eventStore.save("sample_encrypted_topic", event, encryptionKey);
 ```
 
 **Replicate events to Kafka**
