@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023-2024, Dariusz Szpakowski
+ * Copyright (c) 2023-2025, Dariusz Szpakowski
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -25,9 +25,18 @@
 
 package tech.kage.event.replicator;
 
+import javax.sql.DataSource;
+
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.autoconfigure.jdbc.DataSourceProperties;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.jdbc.DataSourceBuilder;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.springframework.scheduling.annotation.EnableScheduling;
+
+import com.zaxxer.hikari.HikariDataSource;
 
 /**
  * Spring Boot application running the process of event replication.
@@ -44,5 +53,29 @@ public class Application {
      */
     public static void main(String[] args) {
         SpringApplication.run(Application.class, args);
+    }
+
+    @Bean
+    @Primary
+    @ConfigurationProperties(prefix = "spring.datasource")
+    DataSource defaultDataSource(DataSourceProperties dataSourceProperties) {
+        var dataSource = DataSourceBuilder.create().type(HikariDataSource.class).build();
+
+        dataSource.setJdbcUrl(dataSourceProperties.getUrl());
+
+        return dataSource;
+    }
+
+    @Bean(name = "lockManagerDataSource")
+    @ConfigurationProperties(prefix = "spring.datasource")
+    DataSource lockManagerDataSource(DataSourceProperties dataSourceProperties) {
+        var dataSource = DataSourceBuilder.create().type(HikariDataSource.class).build();
+
+        dataSource.setJdbcUrl(dataSourceProperties.getUrl());
+        dataSource.setMaximumPoolSize(1);
+        dataSource.setMinimumIdle(1);
+        dataSource.setPoolName("HikariPool-LockManager");
+
+        return dataSource;
     }
 }

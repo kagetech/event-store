@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023-2024, Dariusz Szpakowski
+ * Copyright (c) 2023-2025, Dariusz Szpakowski
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -119,6 +119,7 @@ class EventReplicator {
      *
      * @param kafkaAdmin      an instance of {@link KafkaAdmin}
      * @param jdbcTemplate    an instance of {@link JdbcTemplate}
+     * @param lockManager     an instance of {@link LockManager}
      * @param consumerFactory an instance of {@link ConsumerFactory}
      * @param meterRegistry   an instance of {@link MeterRegistry}
      * @param environment     an instance of {@link Environment}
@@ -130,6 +131,7 @@ class EventReplicator {
     void init(
             KafkaAdmin kafkaAdmin,
             JdbcTemplate jdbcTemplate,
+            LockManager lockManager,
             ConsumerFactory<byte[], byte[]> consumerFactory,
             MeterRegistry meterRegistry,
             Environment environment,
@@ -140,13 +142,27 @@ class EventReplicator {
             return;
         }
 
+        log.info("Attempting to acquire lock...");
+
+        if (!lockManager.acquireLock()) {
+            throw new IllegalStateException("Failed to acquire lock");
+        }
+
+        log.info("Lock acquired");
+
+        log.info("Scheduling lock monitor...");
+
+        taskScheduler.scheduleWithFixedDelay(new LockMonitor(lockManager), Duration.ofMillis(pollInterval));
+
         // create progress Kafka topic
         kafkaAdmin.createOrModifyTopics(TopicBuilder.name(PROGRESS_TOPIC).partitions(1).compact().build());
 
-        log.info("Reading last replicated event id");
+        log.info("Reading last replicated event ids...");
 
         // read last replicated event ids (map topic->id)
         var lastIds = readLastIds(getReplicatedTopics(jdbcTemplate), consumerFactory);
+
+        log.info("Scheduling workers...");
 
         // for each replicated topic
         for (var lastId : lastIds.entrySet()) {
