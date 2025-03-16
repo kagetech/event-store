@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023-2025, Dariusz Szpakowski
+ * Copyright (c) 2025, Dariusz Szpakowski
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -23,39 +23,42 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+package tech.kage.event.replicator.entity;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /**
- * Replicator of events from PostgreSQL tables to Kafka topics.
+ * Component responsible for monitoring validity of the Event Replicator lock
+ * ensuring that no other instance is running.
  * 
  * @author Dariusz Szpakowski
  */
-module tech.kage.event.replicator {
-    requires tech.kage.event;
-    requires tech.kage.event.crypto;
+class LockMonitor implements Runnable {
+    private static final Logger log = LoggerFactory.getLogger(LockMonitor.class);
 
-    requires spring.boot;
-    requires spring.boot.autoconfigure;
+    private final LockManager lockManager;
 
-    requires spring.beans;
-    requires spring.context;
-    requires transitive spring.core;
+    /**
+     * Constructs a new {@link LockMonitor} instance.
+     *
+     * @param lockManager an instance of {@link LockManager}
+     */
+    LockMonitor(LockManager lockManager) {
+        this.lockManager = lockManager;
+    }
 
-    requires org.slf4j;
+    @Override
+    public void run() {
+        if (!lockManager.acquireLock()) {
+            log.error("Fatal error (another instance running?), quitting...");
 
-    // Entity
-    requires transitive spring.jdbc;
-    requires spring.tx;
-    requires java.sql;
-    requires com.zaxxer.hikari;
+            exit(1);
+        }
+    }
 
-    requires transitive spring.kafka;
-    requires spring.messaging;
-    requires kafka.clients;
-
-    requires micrometer.core;
-
-    exports tech.kage.event.replicator to spring.beans, spring.context;
-    exports tech.kage.event.replicator.entity to spring.beans, spring.context;
-
-    opens tech.kage.event.replicator to spring.core;
-    opens tech.kage.event.replicator.entity to spring.core;
+    // Added for testability
+    protected void exit(int code) {
+        System.exit(code);
+    }
 }

@@ -28,7 +28,11 @@ package tech.kage.event.replicator.entity;
 import static java.util.stream.Collectors.toMap;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static tech.kage.event.replicator.entity.EventReplicator.PROGRESS_TOPIC;
@@ -42,7 +46,6 @@ import java.util.stream.LongStream;
 
 import org.assertj.core.groups.Tuple;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
@@ -63,7 +66,6 @@ import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.KafkaAdmin;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.TaskScheduler;
-import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -96,6 +98,9 @@ class EventReplicatorIT {
     @Autowired
     KafkaTemplate<byte[], byte[]> kafkaTemplate;
 
+    @MockitoBean
+    LockManager lockManager;
+
     @Autowired
     ConsumerFactory<byte[], byte[]> consumerFactory;
 
@@ -122,7 +127,6 @@ class EventReplicatorIT {
     static final KafkaContainer kafka = new KafkaContainer("apache/kafka-native:3.8.1");
 
     @Configuration
-    @EnableScheduling
     @EnableAutoConfiguration
     @Import(EventReplicator.class)
     static class TestConfiguration {
@@ -156,8 +160,12 @@ class EventReplicatorIT {
     @Test
     @Order(1)
     void preparesReplicatedEventTopics() {
+        // Given
+        given(lockManager.acquireLock()).willReturn(true);
+
         // When
-        eventReplicator.init(kafkaAdmin, jdbcTemplate, consumerFactory, meterRegistry, environment, pollInterval, true);
+        eventReplicator.init(kafkaAdmin, jdbcTemplate, lockManager, consumerFactory, meterRegistry, environment,
+                pollInterval, true);
 
         // Then
         assertThatCode(() -> kafkaAdmin.describeTopics(topicLastIds.keySet().toArray(String[]::new)))
@@ -166,8 +174,34 @@ class EventReplicatorIT {
 
     @Test
     @Order(2)
+    void schedulesLockMonitor() {
+        // Given
+        given(lockManager.acquireLock()).willReturn(true);
+
+        var expectedScheduledTasksCount = topicLastIds.size() + 1; // include lock monitor
+        var expectedDelay = Duration.ofMillis(pollInterval);
+
+        // When
+        eventReplicator.init(kafkaAdmin, jdbcTemplate, lockManager, consumerFactory, meterRegistry, environment,
+                pollInterval, true);
+
+        // Then
+        var taskCaptor = ArgumentCaptor.forClass(Runnable.class);
+
+        verify(taskScheduler, times(expectedScheduledTasksCount))
+                .scheduleWithFixedDelay(taskCaptor.capture(), eq(expectedDelay));
+
+        assertThat(taskCaptor.getAllValues().get(0))
+                .describedAs("first scheduled task type")
+                .isInstanceOf(LockMonitor.class);
+    }
+
+    @Test
+    @Order(3)
     void schedulesEventReplicatorWorkers() {
         // Given
+        given(lockManager.acquireLock()).willReturn(true);
+
         // store initial progress
         kafkaTemplate.executeInTransaction(kafkaTransaction -> {
             for (var topicEntry : topicLastIds.entrySet()) {
@@ -186,32 +220,39 @@ class EventReplicatorIT {
                 .map(topicEntry -> new Tuple(topicEntry.getKey(), topicEntry.getValue()))
                 .toList();
 
+        var expectedScheduledTasksCount = topicLastIds.size() + 1; // include lock monitor
         var expectedDelay = Duration.ofMillis(pollInterval);
 
         // When
-        eventReplicator.init(kafkaAdmin, jdbcTemplate, consumerFactory, meterRegistry, environment, pollInterval, true);
+        eventReplicator.init(kafkaAdmin, jdbcTemplate, lockManager, consumerFactory, meterRegistry, environment,
+                pollInterval, true);
 
         // Then
         var taskCaptor = ArgumentCaptor.forClass(Runnable.class);
 
-        verify(taskScheduler, times(expectedTopicLastIds.size()))
+        verify(taskScheduler, times(expectedScheduledTasksCount))
                 .scheduleWithFixedDelay(taskCaptor.capture(), eq(expectedDelay));
 
-        assertThat(taskCaptor.getAllValues())
+        var scheduledTasks = taskCaptor.getAllValues();
+        var testedTasks = scheduledTasks.subList(1, scheduledTasks.size());
+
+        assertThat(testedTasks)
                 .describedAs("scheduled tasks type")
                 .hasOnlyElementsOfType(EventReplicatorWorker.class);
 
-        assertThat(taskCaptor.getAllValues())
+        assertThat(testedTasks)
                 .describedAs("scheduled tasks")
                 .extracting("replicatedTopic", "lastId")
                 .containsExactlyInAnyOrderElementsOf(expectedTopicLastIds);
     }
 
     @Test
-    @Order(3)
+    @Order(4)
     void throwsExceptionWhenProgressTopicIsFilled(
             @Value("${spring.kafka.consumer.max-poll-records}") int kafkaConsumerMaxPollRecords) {
         // Given
+        given(lockManager.acquireLock()).willReturn(true);
+
         // progress topic is filled
         kafkaTemplate.executeInTransaction(kafkaTransaction -> {
             for (var i = 0; i <= kafkaConsumerMaxPollRecords; i++) {
@@ -222,15 +263,37 @@ class EventReplicatorIT {
         });
 
         // When
-        var thrown = Assertions.assertThrows(
-                IllegalStateException.class,
-                () -> eventReplicator.init(
-                        kafkaAdmin, jdbcTemplate, consumerFactory, meterRegistry, environment, pollInterval, true));
+        var thrown = assertThrows(
+                Throwable.class,
+                () -> eventReplicator.init(kafkaAdmin, jdbcTemplate, lockManager, consumerFactory, meterRegistry,
+                        environment, pollInterval, true));
 
         // Then
-        assertThat(thrown.getMessage())
+        assertThat(thrown)
                 .describedAs("thrown exception")
-                .contains("kafkaConsumerMaxPollRecords");
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("kafkaConsumerMaxPollRecords");
+    }
+
+    @Test
+    @Order(5)
+    void throwsExceptionWhenLockCannotBeAcquired() {
+        // Given
+        given(lockManager.acquireLock()).willReturn(false);
+
+        // When
+        var thrown = assertThrows(
+                Throwable.class,
+                () -> eventReplicator.init(kafkaAdmin, jdbcTemplate, lockManager, consumerFactory, meterRegistry,
+                        environment, pollInterval, true));
+
+        // Then
+        assertThat(thrown)
+                .describedAs("thrown exception")
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("lock");
+
+        verify(taskScheduler, never()).scheduleWithFixedDelay(any(), any());
     }
 
     private byte[] stringToBytes(String str) {
