@@ -40,17 +40,10 @@ import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.ListOffsetsOptions;
 import org.apache.kafka.clients.admin.OffsetSpec;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.IsolationLevel;
 import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.common.serialization.ByteArrayDeserializer;
-import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Import;
 import org.springframework.kafka.core.KafkaAdmin;
 import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.stereotype.Component;
@@ -61,15 +54,12 @@ import jakarta.annotation.PreDestroy;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.kafka.receiver.KafkaReceiver;
-import reactor.kafka.receiver.MicrometerConsumerListener;
 import reactor.kafka.receiver.ReceiverOptions;
 import reactor.kafka.receiver.ReceiverPartition;
 import reactor.kafka.receiver.ReceiverRecord;
 import reactor.kafka.sender.KafkaSender;
-import reactor.kafka.sender.SenderOptions;
 import tech.kage.event.Event;
 import tech.kage.event.EventStore;
-import tech.kage.event.crypto.EventEncryptor;
 
 /**
  * A Kafka-based implementation of {@link EventStore} storing events in Kafka
@@ -406,43 +396,6 @@ public class ReactorKafkaEventStore<K, V extends SpecificRecord> implements Even
             throw new IllegalStateException("Unable to compute consumer lag for " + topicPartition, e);
         } catch (ExecutionException e) {
             throw new IllegalStateException("Unable to compute consumer lag for " + topicPartition, e);
-        }
-    }
-
-    @Configuration
-    @Import({ ReactorKafkaEventTransformer.class, EventEncryptor.class })
-    static class Config {
-        @Bean
-        KafkaSender<Object, byte[]> kafkaSender(SenderOptions<Object, byte[]> senderOptions) {
-            return KafkaSender.create(senderOptions);
-        }
-
-        @Bean
-        SenderOptions<Object, byte[]> kafkaSenderOptions(KafkaProperties properties) {
-            var props = properties.buildProducerProperties(null);
-
-            props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class);
-
-            return SenderOptions.create(props);
-        }
-
-        @Bean
-        ReceiverOptions<Object, byte[]> kafkaReceiverOptions(
-                KafkaProperties properties,
-                Optional<MeterRegistry> meterRegistry) {
-            var props = properties.buildConsumerProperties(null);
-
-            props.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_committed");
-            props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
-            props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-            props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class);
-
-            return ReceiverOptions
-                    .<Object, byte[]>create(props)
-                    .consumerListener(
-                            meterRegistry.isPresent()
-                                    ? new MicrometerConsumerListener(meterRegistry.get())
-                                    : null);
         }
     }
 }

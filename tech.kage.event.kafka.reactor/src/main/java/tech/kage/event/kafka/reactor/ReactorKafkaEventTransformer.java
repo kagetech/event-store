@@ -46,9 +46,6 @@ import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.header.internals.RecordHeader;
 import org.apache.kafka.common.serialization.Deserializer;
 import org.apache.kafka.common.serialization.Serializer;
-import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
 import org.springframework.stereotype.Component;
 
 import reactor.core.publisher.Mono;
@@ -190,63 +187,5 @@ class ReactorKafkaEventTransformer {
         }
 
         return Collections.unmodifiableMap(metadataMap);
-    }
-
-    @Configuration
-    static class Config {
-        private static final String VALUE_SUBJECT_NAME_STRATEGY_CONFIG = "value.subject.name.strategy";
-        private static final String VALUE_SUBJECT_NAME_STRATEGY = "io.confluent.kafka.serializers.subject.RecordNameStrategy";
-
-        private static final String SPECIFIC_AVRO_READER_CONFIG = "specific.avro.reader";
-
-        private static final String KAFKA_AVRO_SERIALIZER_CLASS = "io.confluent.kafka.serializers.KafkaAvroSerializer";
-        private static final String KAFKA_AVRO_DESERIALIZER_CLASS = "io.confluent.kafka.serializers.KafkaAvroDeserializer";
-
-        @Bean
-        Serializer<SpecificRecord> kafkaAvroSerializer(KafkaProperties properties) {
-            var serializerConfig = new HashMap<>(properties.getProperties());
-
-            serializerConfig.putIfAbsent(VALUE_SUBJECT_NAME_STRATEGY_CONFIG, VALUE_SUBJECT_NAME_STRATEGY);
-
-            // Construct a new Kafka Avro Serializer instance via reflection because
-            // kafka-avro-serializer dependency is not compatible with module-info.java
-            // (split package).
-
-            @SuppressWarnings("unchecked")
-            var kafkaAvroSerializer = (Serializer<SpecificRecord>) getInstance(KAFKA_AVRO_SERIALIZER_CLASS);
-
-            kafkaAvroSerializer.configure(serializerConfig, false);
-
-            return kafkaAvroSerializer;
-        }
-
-        @Bean
-        Deserializer<SpecificRecord> kafkaAvroDeserializer(KafkaProperties properties) {
-            var deserializerConfig = new HashMap<>(properties.getProperties());
-
-            deserializerConfig.putIfAbsent(SPECIFIC_AVRO_READER_CONFIG, "true");
-            deserializerConfig.putIfAbsent(VALUE_SUBJECT_NAME_STRATEGY_CONFIG, VALUE_SUBJECT_NAME_STRATEGY);
-
-            // Construct a new Kafka Avro Deserializer instance via reflection because
-            // kafka-avro-serializer dependency is not compatible with module-info.java
-            // (split package).
-
-            @SuppressWarnings("unchecked")
-            var kafkaAvroDeserializer = (Deserializer<SpecificRecord>) getInstance(KAFKA_AVRO_DESERIALIZER_CLASS);
-
-            kafkaAvroDeserializer.configure(deserializerConfig, false);
-
-            return kafkaAvroDeserializer;
-        }
-
-        private Object getInstance(String className) {
-            try {
-                var ctor = Class.forName(className).getConstructor();
-
-                return ctor.newInstance();
-            } catch (Exception e) {
-                throw new IllegalArgumentException("Unable to instantiate " + className, e);
-            }
-        }
     }
 }

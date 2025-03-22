@@ -71,9 +71,8 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Scope;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.convention.TestBean;
@@ -90,7 +89,10 @@ import tech.kage.event.crypto.EventEncryptor;
  * 
  * @author Dariusz Szpakowski
  */
-@SpringBootTest
+@SpringBootTest(classes = {
+        KafkaStreamsEventTransformer.class,
+        EventEncryptor.class,
+        KafkaStreamsEventTransformerIT.TestConfig.class })
 @ActiveProfiles("test")
 class KafkaStreamsEventTransformerIT {
     // UUT
@@ -133,9 +135,8 @@ class KafkaStreamsEventTransformerIT {
 
     static final Map<URI, KeysetHandle> testKms = new HashMap<>();
 
-    @Configuration
-    @Import({ KafkaStreamsEventTransformer.class, EventEncryptor.class })
-    static class TestConfiguration {
+    @TestConfiguration
+    static class TestConfig {
         @Bean
         @Scope(SCOPE_PROTOTYPE)
         Aead aead(URI encryptionKey) throws GeneralSecurityException {

@@ -48,6 +48,6 @@ class IntegerKeyReactorKafkaEventStoreIT extends ReactorKafkaEventStoreIT<Intege
         registry.add("spring.kafka.consumer.key-deserializer", IntegerDeserializer.class::getName);
     }
 
-    static class TestConfiguration extends ReactorKafkaEventStoreIT.TestConfiguration {
+    static class TestConfig extends ReactorKafkaEventStoreIT.TestConfig {
     }
 }

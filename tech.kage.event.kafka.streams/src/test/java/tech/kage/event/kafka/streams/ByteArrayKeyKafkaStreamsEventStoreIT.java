@@ -50,6 +50,6 @@ class ByteArrayKeyKafkaStreamsEventStoreIT extends KafkaStreamsEventStoreIT<byte
         registry.add("spring.kafka.properties.default.key.serde", () -> Serdes.ByteArray().getClass().getName());
     }
 
-    static class TestConfiguration extends KafkaStreamsEventStoreIT.TestConfiguration {
+    static class TestConfig extends KafkaStreamsEventStoreIT.TestConfig {
     }
 }

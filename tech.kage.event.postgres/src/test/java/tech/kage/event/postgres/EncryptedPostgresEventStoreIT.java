@@ -65,7 +65,7 @@ class EncryptedPostgresEventStoreIT extends UUIDKeyPostgresEventStoreIT {
 
     static final Map<URI, KeysetHandle> testKms = new HashMap<>();
 
-    static class TestConfiguration extends UUIDKeyPostgresEventStoreIT.TestConfiguration {
+    static class TestConfig extends UUIDKeyPostgresEventStoreIT.TestConfig {
         @Bean
         @Scope(SCOPE_PROTOTYPE)
         Aead aead(URI encryptionKey) throws GeneralSecurityException {

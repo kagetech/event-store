@@ -41,7 +41,7 @@ import org.springframework.context.annotation.Bean;
  * @author Dariusz Szpakowski
  */
 class UUIDKeyPostgresEventStoreWithKafkaPropertiesIT extends UUIDKeyPostgresEventStoreIT {
-    static class TestConfiguration extends PostgresEventStoreIT.TestConfiguration {
+    static class TestConfig extends PostgresEventStoreIT.TestConfig {
         @Bean
         KafkaProperties kafkaProperties(@Value("${schema.registry.url}") String schemaRegistryUrl) {
             var kafkaProperties = mock(KafkaProperties.class);

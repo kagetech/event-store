@@ -45,7 +45,7 @@ import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
  */
 class KafkaProducerFactoryConfigurationTest {
     // UUT
-    KafkaStreamsEventStore.Config config = new KafkaStreamsEventStore.Config();
+    KafkaStreamsEventStoreAutoConfiguration config = new KafkaStreamsEventStoreAutoConfiguration();
 
     @ParameterizedTest
     @MethodSource("testKafkaProperties")

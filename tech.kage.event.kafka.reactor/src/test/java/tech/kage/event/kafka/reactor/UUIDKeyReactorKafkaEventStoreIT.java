@@ -50,6 +50,6 @@ class UUIDKeyReactorKafkaEventStoreIT extends ReactorKafkaEventStoreIT<UUID> {
         registry.add("spring.kafka.consumer.key-deserializer", UUIDDeserializer.class::getName);
     }
 
-    static class TestConfiguration extends ReactorKafkaEventStoreIT.TestConfiguration {
+    static class TestConfig extends ReactorKafkaEventStoreIT.TestConfig {
     }
 }

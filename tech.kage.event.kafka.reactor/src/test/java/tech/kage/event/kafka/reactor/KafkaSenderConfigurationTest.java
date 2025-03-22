@@ -40,7 +40,7 @@ import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
  */
 class KafkaSenderConfigurationTest {
     // UUT
-    ReactorKafkaEventStore.Config config = new ReactorKafkaEventStore.Config();
+    ReactorKafkaEventStoreAutoConfiguration config = new ReactorKafkaEventStoreAutoConfiguration();
 
     @Test
     void createsDefaultSenderConfiguration() {

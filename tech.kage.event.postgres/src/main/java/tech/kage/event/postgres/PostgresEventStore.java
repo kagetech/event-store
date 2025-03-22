@@ -30,15 +30,10 @@ import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 
 import org.apache.avro.specific.SpecificRecord;
 import org.apache.kafka.common.serialization.Serializer;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Import;
 import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.stereotype.Component;
 
@@ -162,65 +157,5 @@ public class PostgresEventStore<K, V extends SpecificRecord> implements EventSto
         }
 
         return MetadataSerializer.serialize(preparedMetadata);
-    }
-
-    @Configuration
-    @Import(EventEncryptor.class)
-    static class Config {
-        private static final String SCHEMA_REGISTRY_URL_CONFIG = "schema.registry.url";
-        private static final String SCHEMA_REGISTRY_URL_NOT_SET_ERROR = "schema.registry.url must be set";
-
-        private static final String VALUE_SUBJECT_NAME_STRATEGY_CONFIG = "value.subject.name.strategy";
-        private static final String VALUE_SUBJECT_NAME_STRATEGY = "io.confluent.kafka.serializers.subject.RecordNameStrategy";
-
-        private static final String KAFKA_AVRO_SERIALIZER_CLASS = "io.confluent.kafka.serializers.KafkaAvroSerializer";
-
-        /**
-         * Creates an Avro enabled Kafka {@link Serializer}.
-         * 
-         * @param schemaRegistryUrl address pointing to a Confluent Schema Registry
-         *                          instance (required if {@link KafkaProperties} bean
-         *                          is not available)
-         * @param kafkaProperties   {@link KafkaProperties} bean used for configuring
-         *                          the serializer (optional)
-         * 
-         * @return an instance of {@link Serializer}
-         */
-        @Bean
-        Serializer<SpecificRecord> kafkaAvroSerializer(
-                @Value("${" + SCHEMA_REGISTRY_URL_CONFIG + ":#{null}}") String schemaRegistryUrl,
-                Optional<KafkaProperties> kafkaProperties) {
-            var serializerConfig = kafkaProperties.isPresent()
-                    ? kafkaProperties.get().getProperties()
-                    : Map.of(
-                            SCHEMA_REGISTRY_URL_CONFIG,
-                            Objects.requireNonNull(schemaRegistryUrl, SCHEMA_REGISTRY_URL_NOT_SET_ERROR),
-                            VALUE_SUBJECT_NAME_STRATEGY_CONFIG, VALUE_SUBJECT_NAME_STRATEGY);
-
-            var kafkaAvroSerializer = getSerializerInstance();
-
-            kafkaAvroSerializer.configure(serializerConfig, false);
-
-            return kafkaAvroSerializer;
-        }
-
-        /**
-         * Constructs a new Kafka Avro Serializer instance. Uses reflection because
-         * {@code kafka-avro-serializer} dependency is not compatible with
-         * {@code module-info.java} (split package).
-         * 
-         * @return new Kafka Avro Serializer instance
-         */
-        @SuppressWarnings("unchecked")
-        private Serializer<SpecificRecord> getSerializerInstance() {
-            try {
-                var ctor = Class.forName(KAFKA_AVRO_SERIALIZER_CLASS).getConstructor();
-
-                return (Serializer<SpecificRecord>) ctor.newInstance();
-            } catch (Exception e) {
-                throw new IllegalArgumentException(
-                        "Unable to instantiate serializer " + KAFKA_AVRO_SERIALIZER_CLASS, e);
-            }
-        }
     }
 }

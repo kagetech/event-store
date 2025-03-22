@@ -40,7 +40,7 @@ import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
  */
 class KafkaStreamsConfigurationTest {
     // UUT
-    KafkaStreamsEventStore.Config config = new KafkaStreamsEventStore.Config();
+    KafkaStreamsEventStoreAutoConfiguration config = new KafkaStreamsEventStoreAutoConfiguration();
 
     @Test
     void createsDefaultKafkaStreamsConfig() {

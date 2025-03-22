@@ -44,11 +44,12 @@ import tech.kage.event.Event;
  * @author Dariusz Szpakowski
  */
 class IntegerKeyPostgresEventStoreIT extends PostgresEventStoreIT<Integer> {
+    @Override
     protected String getKeyType() {
         return "integer";
     }
 
-    static class TestConfiguration extends PostgresEventStoreIT.TestConfiguration {
+    static class TestConfig extends PostgresEventStoreIT.TestConfig {
     }
 
     static Stream<Arguments> testEvents() {

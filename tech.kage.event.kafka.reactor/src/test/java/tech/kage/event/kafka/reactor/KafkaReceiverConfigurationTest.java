@@ -46,7 +46,7 @@ import reactor.kafka.receiver.MicrometerConsumerListener;
  */
 class KafkaReceiverConfigurationTest {
     // UUT
-    ReactorKafkaEventStore.Config config = new ReactorKafkaEventStore.Config();
+    ReactorKafkaEventStoreAutoConfiguration config = new ReactorKafkaEventStoreAutoConfiguration();
 
     @Test
     void createsDefaultReceiverConfiguration() {
