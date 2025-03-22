@@ -71,7 +71,7 @@ class EncryptedReactorKafkaEventStoreIT extends UUIDKeyReactorKafkaEventStoreIT 
 
     static final Map<URI, KeysetHandle> testKms = new HashMap<>();
 
-    static class TestConfiguration extends ReactorKafkaEventStoreIT.TestConfiguration {
+    static class TestConfig extends ReactorKafkaEventStoreIT.TestConfig {
         @Bean
         @Scope(SCOPE_PROTOTYPE)
         Aead aead(URI encryptionKey) throws GeneralSecurityException {

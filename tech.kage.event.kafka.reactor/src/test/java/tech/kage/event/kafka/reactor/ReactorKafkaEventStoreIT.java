@@ -49,9 +49,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Import;
 import org.springframework.core.io.Resource;
 import org.springframework.kafka.config.TopicBuilder;
 import org.springframework.kafka.core.KafkaAdmin;
@@ -137,10 +136,9 @@ abstract class ReactorKafkaEventStoreIT<K> {
                 () -> "http://%s:%s".formatted(schemaRegistry.getHost(), schemaRegistry.getFirstMappedPort()));
     }
 
-    @Configuration
+    @TestConfiguration
     @EnableAutoConfiguration
-    @Import(ReactorKafkaEventStore.class)
-    static class TestConfiguration {
+    static class TestConfig {
     }
 
     @BeforeEach

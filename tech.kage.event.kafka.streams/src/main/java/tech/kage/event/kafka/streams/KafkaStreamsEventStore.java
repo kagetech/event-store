@@ -26,41 +26,24 @@
 package tech.kage.event.kafka.streams;
 
 import java.net.URI;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.avro.specific.SpecificRecord;
-import org.apache.kafka.clients.producer.ProducerConfig;
-import org.apache.kafka.common.serialization.ByteArraySerializer;
-import org.apache.kafka.common.serialization.Deserializer;
 import org.apache.kafka.common.serialization.Serdes;
-import org.apache.kafka.common.serialization.Serializer;
 import org.apache.kafka.streams.StreamsBuilder;
-import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.kstream.Named;
 import org.apache.kafka.streams.processor.api.ContextualFixedKeyProcessor;
 import org.apache.kafka.streams.processor.api.FixedKeyRecord;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Import;
-import org.springframework.kafka.annotation.EnableKafkaStreams;
-import org.springframework.kafka.annotation.KafkaStreamsDefaultConfiguration;
-import org.springframework.kafka.config.KafkaStreamsConfiguration;
-import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.stereotype.Component;
 
 import reactor.core.publisher.Mono;
 import tech.kage.event.Event;
 import tech.kage.event.EventStore;
-import tech.kage.event.crypto.EventEncryptor;
 
 /**
  * A Kafka-based implementation of {@link EventStore} storing events in Kafka
@@ -205,100 +188,6 @@ public class KafkaStreamsEventStore<K, V extends SpecificRecord> implements Even
 
             context().forward(
                     kafkaStreamsEventTransformer.transform(message.value(), message, topic, encryptionKey));
-        }
-    }
-
-    @Configuration
-    @EnableKafkaStreams
-    @Import({ ProducerRecordEventTransformer.class, KafkaStreamsEventTransformer.class, EventEncryptor.class })
-    static class Config {
-        private static final String DEFAULT_VALUE_SERDE_CLASS = "io.confluent.kafka.streams.serdes.avro.SpecificAvroSerde";
-        private static final String VALUE_SUBJECT_NAME_STRATEGY_CONFIG = "value.subject.name.strategy";
-        private static final String VALUE_SUBJECT_NAME_STRATEGY = "io.confluent.kafka.serializers.subject.RecordNameStrategy";
-
-        private static final String SPECIFIC_AVRO_READER_CONFIG = "specific.avro.reader";
-
-        private static final String KAFKA_AVRO_SERIALIZER_CLASS = "io.confluent.kafka.serializers.KafkaAvroSerializer";
-        private static final String KAFKA_AVRO_DESERIALIZER_CLASS = "io.confluent.kafka.serializers.KafkaAvroDeserializer";
-
-        @Bean
-        ProducerFactory<?, ?> kafkaProducerFactory(KafkaProperties properties) {
-            var props = properties.buildProducerProperties(null);
-
-            props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class);
-
-            var factory = new DefaultKafkaProducerFactory<>(props);
-
-            var transactionIdPrefix = properties.getProducer().getTransactionIdPrefix();
-
-            if (transactionIdPrefix != null) {
-                factory.setTransactionIdPrefix(transactionIdPrefix);
-            }
-
-            return factory;
-        }
-
-        @Bean(name = KafkaStreamsDefaultConfiguration.DEFAULT_STREAMS_CONFIG_BEAN_NAME)
-        KafkaStreamsConfiguration kStreamsConfig(
-                KafkaProperties properties,
-                @Value(value = "${kafka.streams.application.id}") String applicationId) {
-            var props = new HashMap<String, Object>(properties.getProperties());
-
-            props.put(StreamsConfig.APPLICATION_ID_CONFIG, applicationId);
-            props.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, String.join(",", properties.getBootstrapServers()));
-            props.putIfAbsent(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.String().getClass());
-            props.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, DEFAULT_VALUE_SERDE_CLASS);
-            props.put(StreamsConfig.PROCESSING_GUARANTEE_CONFIG, StreamsConfig.EXACTLY_ONCE_V2);
-            props.putIfAbsent(VALUE_SUBJECT_NAME_STRATEGY_CONFIG, VALUE_SUBJECT_NAME_STRATEGY);
-
-            return new KafkaStreamsConfiguration(props);
-        }
-
-        @Bean
-        Serializer<SpecificRecord> kafkaAvroSerializer(KafkaProperties properties) {
-            var serializerConfig = new HashMap<>(properties.getProperties());
-
-            serializerConfig.putIfAbsent(VALUE_SUBJECT_NAME_STRATEGY_CONFIG, VALUE_SUBJECT_NAME_STRATEGY);
-
-            // Construct a new Kafka Avro Serializer instance via reflection because
-            // kafka-avro-serializer dependency is not compatible with module-info.java
-            // (split package).
-
-            @SuppressWarnings("unchecked")
-            var kafkaAvroSerializer = (Serializer<SpecificRecord>) getInstance(KAFKA_AVRO_SERIALIZER_CLASS);
-
-            kafkaAvroSerializer.configure(serializerConfig, false);
-
-            return kafkaAvroSerializer;
-        }
-
-        @Bean
-        Deserializer<SpecificRecord> kafkaAvroDeserializer(KafkaProperties properties) {
-            var deserializerConfig = new HashMap<>(properties.getProperties());
-
-            deserializerConfig.putIfAbsent(SPECIFIC_AVRO_READER_CONFIG, "true");
-            deserializerConfig.putIfAbsent(VALUE_SUBJECT_NAME_STRATEGY_CONFIG, VALUE_SUBJECT_NAME_STRATEGY);
-
-            // Construct a new Kafka Avro Deserializer instance via reflection because
-            // kafka-avro-serializer dependency is not compatible with module-info.java
-            // (split package).
-
-            @SuppressWarnings("unchecked")
-            var kafkaAvroDeserializer = (Deserializer<SpecificRecord>) getInstance(KAFKA_AVRO_DESERIALIZER_CLASS);
-
-            kafkaAvroDeserializer.configure(deserializerConfig, false);
-
-            return kafkaAvroDeserializer;
-        }
-
-        private Object getInstance(String className) {
-            try {
-                var ctor = Class.forName(className).getConstructor();
-
-                return ctor.newInstance();
-            } catch (Exception e) {
-                throw new IllegalArgumentException("Unable to instantiate " + className, e);
-            }
         }
     }
 }

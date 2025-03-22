@@ -52,8 +52,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.kafka.config.TopicBuilder;
 import org.springframework.kafka.core.KafkaAdmin;
@@ -143,10 +143,10 @@ abstract class KafkaStreamsEventStoreIT<K> {
         }
     }
 
-    @Configuration
+    @TestConfiguration
     @EnableAutoConfiguration
-    @Import({ KafkaStreamsEventStore.class, TestStreamsSubscriber.class })
-    static class TestConfiguration {
+    @Import(TestStreamsSubscriber.class)
+    static class TestConfig {
         @Bean
         ReceiverOptions<Object, byte[]> kafkaReceiverOptions(KafkaProperties properties) {
             var props = properties.buildConsumerProperties(null);

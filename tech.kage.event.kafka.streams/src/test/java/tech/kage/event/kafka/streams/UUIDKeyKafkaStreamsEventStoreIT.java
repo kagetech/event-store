@@ -52,6 +52,6 @@ class UUIDKeyKafkaStreamsEventStoreIT extends KafkaStreamsEventStoreIT<UUID> {
         registry.add("spring.kafka.properties.default.key.serde", () -> Serdes.UUID().getClass().getName());
     }
 
-    static class TestConfiguration extends KafkaStreamsEventStoreIT.TestConfiguration {
+    static class TestConfig extends KafkaStreamsEventStoreIT.TestConfig {
     }
 }

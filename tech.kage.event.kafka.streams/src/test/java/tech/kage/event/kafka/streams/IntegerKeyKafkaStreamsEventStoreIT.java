@@ -50,6 +50,6 @@ class IntegerKeyKafkaStreamsEventStoreIT extends KafkaStreamsEventStoreIT<Intege
         registry.add("spring.kafka.properties.default.key.serde", () -> Serdes.Integer().getClass().getName());
     }
 
-    static class TestConfiguration extends KafkaStreamsEventStoreIT.TestConfiguration {
+    static class TestConfig extends KafkaStreamsEventStoreIT.TestConfig {
     }
 }

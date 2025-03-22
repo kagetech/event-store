@@ -49,7 +49,7 @@ class StringKeyPostgresEventStoreIT extends PostgresEventStoreIT<String> {
         return "text";
     }
 
-    static class TestConfiguration extends PostgresEventStoreIT.TestConfiguration {
+    static class TestConfig extends PostgresEventStoreIT.TestConfig {
     }
 
     static Stream<Arguments> testEvents() {

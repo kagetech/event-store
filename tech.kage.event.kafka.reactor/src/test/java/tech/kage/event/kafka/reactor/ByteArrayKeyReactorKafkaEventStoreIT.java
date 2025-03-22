@@ -48,6 +48,6 @@ class ByteArrayKeyReactorKafkaEventStoreIT extends ReactorKafkaEventStoreIT<byte
         registry.add("spring.kafka.consumer.key-deserializer", ByteArrayDeserializer.class::getName);
     }
 
-    static class TestConfiguration extends ReactorKafkaEventStoreIT.TestConfiguration {
+    static class TestConfig extends ReactorKafkaEventStoreIT.TestConfig {
     }
 }

@@ -105,7 +105,7 @@ class EncryptedKafkaStreamsEventStoreIT extends UUIDKeyKafkaStreamsEventStoreIT 
     }
 
     @Import({ KafkaStreamsEventStore.class, TestStreamsSubscriber.class, TestEncryptedStreamsSubscriber.class })
-    static class TestConfiguration extends KafkaStreamsEventStoreIT.TestConfiguration {
+    static class TestConfig extends KafkaStreamsEventStoreIT.TestConfig {
         @Bean
         @Scope(SCOPE_PROTOTYPE)
         Aead aead(URI encryptionKey) throws GeneralSecurityException {
