@@ -14,13 +14,13 @@ Uses [Apache Avro](https://avro.apache.org/) for payload serialization and store
 <dependency>
     <groupId>tech.kage.event</groupId>
     <artifactId>tech.kage.event</artifactId>
-    <version>1.3.0</version>
+    <version>1.3.1</version>
 </dependency>
 
 <dependency>
     <groupId>tech.kage.event</groupId>
     <artifactId>tech.kage.event.kafka.streams</artifactId>
-    <version>1.3.0</version>
+    <version>1.3.1</version>
 </dependency>
 ```
 
@@ -31,13 +31,6 @@ module my.simple.mod {
     requires tech.kage.event;
     requires tech.kage.event.kafka.streams;
 }
-```
-
-**Spring Boot application**
-
-```java
-@SpringBootApplication
-@Import(KafkaStreamsEventStore.class)
 ```
 
 **application.properties**
