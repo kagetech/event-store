@@ -28,13 +28,13 @@ CREATE TABLE IF NOT EXISTS events.test_events (
 <dependency>
     <groupId>tech.kage.event</groupId>
     <artifactId>tech.kage.event</artifactId>
-    <version>1.3.0</version>
+    <version>1.3.1</version>
 </dependency>
 
 <dependency>
     <groupId>tech.kage.event</groupId>
     <artifactId>tech.kage.event.postgres</artifactId>
-    <version>1.3.0</version>
+    <version>1.3.1</version>
 </dependency>
 ```
 
@@ -45,13 +45,6 @@ module my.simple.mod {
     requires tech.kage.event;
     requires tech.kage.event.postgres;
 }
-```
-
-**Spring Boot application**
-
-```java
-@SpringBootApplication
-@Import(PostgresEventStore.class)
 ```
 
 **Schema Registry URL**

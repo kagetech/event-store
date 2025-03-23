@@ -28,13 +28,13 @@ CREATE TABLE IF NOT EXISTS events.topic_offsets (
 <dependency>
     <groupId>tech.kage.event</groupId>
     <artifactId>tech.kage.event</artifactId>
-    <version>1.3.0</version>
+    <version>1.3.1</version>
 </dependency>
 
 <dependency>
     <groupId>tech.kage.event</groupId>
     <artifactId>tech.kage.event.kafka.reactor</artifactId>
-    <version>1.3.0</version>
+    <version>1.3.1</version>
 </dependency>
 ```
 
@@ -45,13 +45,6 @@ module my.simple.mod {
     requires tech.kage.event;
     requires tech.kage.event.kafka.reactor;
 }
-```
-
-**Spring Boot application**
-
-```java
-@SpringBootApplication
-@Import(ReactorKafkaEventStore.class)
 ```
 
 **application.properties**
