@@ -38,11 +38,10 @@ import static org.mockito.Mockito.verify;
 import static tech.kage.event.replicator.entity.EventReplicator.PROGRESS_TOPIC;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Map;
-import java.util.stream.LongStream;
+import java.util.stream.IntStream;
 
 import org.assertj.core.groups.Tuple;
 import org.junit.jupiter.api.AfterEach;
@@ -116,7 +115,7 @@ class EventReplicatorIT {
     @MockitoBean
     TaskScheduler taskScheduler;
 
-    Map<String, Long> topicLastIds;
+    Map<String, String> topicLastLsns;
 
     @Container
     @ServiceConnection
@@ -134,14 +133,16 @@ class EventReplicatorIT {
 
     @BeforeEach
     void setUp(@Value("classpath:/test-data/events/ddl.sql") Resource ddl) throws IOException {
-        topicLastIds = LongStream
+        topicLastLsns = IntStream
                 .rangeClosed(1, 10)
                 .boxed()
-                .map(id -> Map.entry("test_" + id + System.currentTimeMillis() + "_events", id))
+                .map(id -> Map.entry(
+                        "test_" + id + System.currentTimeMillis() + "_events",
+                        "0/" + Integer.toHexString(id)))
                 .collect(toMap(Map.Entry::getKey, Map.Entry::getValue));
 
         // create source event tables
-        for (var topic : topicLastIds.keySet()) {
+        for (var topic : topicLastLsns.keySet()) {
             jdbcTemplate.execute(
                     ddl.getContentAsString(StandardCharsets.UTF_8)
                             .replace("<<topic_name>>", topic)
@@ -152,7 +153,7 @@ class EventReplicatorIT {
     @AfterEach
     void tearDown() {
         // drop source event tables
-        for (var topic : topicLastIds.keySet()) {
+        for (var topic : topicLastLsns.keySet()) {
             jdbcTemplate.execute("drop table events." + topic);
         }
     }
@@ -168,7 +169,7 @@ class EventReplicatorIT {
                 pollInterval, true);
 
         // Then
-        assertThatCode(() -> kafkaAdmin.describeTopics(topicLastIds.keySet().toArray(String[]::new)))
+        assertThatCode(() -> kafkaAdmin.describeTopics(topicLastLsns.keySet().toArray(String[]::new)))
                 .doesNotThrowAnyException();
     }
 
@@ -178,7 +179,7 @@ class EventReplicatorIT {
         // Given
         given(lockManager.acquireLock()).willReturn(true);
 
-        var expectedScheduledTasksCount = topicLastIds.size() + 1; // include lock monitor
+        var expectedScheduledTasksCount = topicLastLsns.size() + 1; // include lock monitor
         var expectedDelay = Duration.ofMillis(pollInterval);
 
         // When
@@ -204,23 +205,23 @@ class EventReplicatorIT {
 
         // store initial progress
         kafkaTemplate.executeInTransaction(kafkaTransaction -> {
-            for (var topicEntry : topicLastIds.entrySet()) {
+            for (var topicEntry : topicLastLsns.entrySet()) {
                 kafkaTransaction.send(
                         PROGRESS_TOPIC,
                         stringToBytes(topicEntry.getKey()),
-                        longToBytes(topicEntry.getValue()));
+                        stringToBytes(topicEntry.getValue()));
             }
 
             return 0;
         });
 
-        var expectedTopicLastIds = topicLastIds
+        var expectedTopicLastLsns = topicLastLsns
                 .entrySet()
                 .stream()
                 .map(topicEntry -> new Tuple(topicEntry.getKey(), topicEntry.getValue()))
                 .toList();
 
-        var expectedScheduledTasksCount = topicLastIds.size() + 1; // include lock monitor
+        var expectedScheduledTasksCount = topicLastLsns.size() + 1; // include lock monitor
         var expectedDelay = Duration.ofMillis(pollInterval);
 
         // When
@@ -242,8 +243,8 @@ class EventReplicatorIT {
 
         assertThat(testedTasks)
                 .describedAs("scheduled tasks")
-                .extracting("replicatedTopic", "lastId")
-                .containsExactlyInAnyOrderElementsOf(expectedTopicLastIds);
+                .extracting("replicatedTopic", "lastLsn")
+                .containsExactlyInAnyOrderElementsOf(expectedTopicLastLsns);
     }
 
     @Test
@@ -256,7 +257,7 @@ class EventReplicatorIT {
         // progress topic is filled
         kafkaTemplate.executeInTransaction(kafkaTransaction -> {
             for (var i = 0; i <= kafkaConsumerMaxPollRecords; i++) {
-                kafkaTransaction.send(PROGRESS_TOPIC, stringToBytes("test_topic"), longToBytes(0l));
+                kafkaTransaction.send(PROGRESS_TOPIC, stringToBytes("test_topic"), stringToBytes("0/0"));
             }
 
             return 0;
@@ -298,12 +299,5 @@ class EventReplicatorIT {
 
     private byte[] stringToBytes(String str) {
         return str.getBytes(StandardCharsets.UTF_8);
-    }
-
-    private byte[] longToBytes(long val) {
-        return ByteBuffer
-                .allocate(Long.BYTES)
-                .putLong(val)
-                .array();
     }
 }

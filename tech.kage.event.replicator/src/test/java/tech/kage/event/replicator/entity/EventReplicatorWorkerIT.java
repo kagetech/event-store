@@ -29,10 +29,10 @@ import static java.util.Comparator.comparing;
 import static java.util.stream.Collectors.toCollection;
 import static org.assertj.core.api.Assertions.assertThat;
 import static tech.kage.event.EventStore.SOURCE_ID;
+import static tech.kage.event.EventStore.SOURCE_LSN;
 import static tech.kage.event.replicator.entity.EventReplicator.PROGRESS_TOPIC;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -128,10 +128,10 @@ abstract class EventReplicatorWorkerIT<K> {
     @Test
     void copiesEventsFromDatabaseToKafkaInSinglePoll() {
         // Given
-        var lastId = 0;
+        var lastLsn = "0/0";
 
         var worker = new EventReplicatorWorker(
-                jdbcTemplate, kafkaTemplate, meterRegistry, environment, eventSchema, topic, lastId);
+                jdbcTemplate, kafkaTemplate, meterRegistry, environment, eventSchema, topic, lastLsn);
 
         var sourceEvents = IntStream
                 .rangeClosed(1, maxPollRows - 1)
@@ -164,35 +164,19 @@ abstract class EventReplicatorWorkerIT<K> {
                             .describedAs("replicated event timestamp")
                             .isEqualTo(sourceEvent.timestamp().toEpochMilli());
 
-                    var expectedHeaderList = sourceEvent
-                            .metadata()
-                            .entrySet()
-                            .stream()
-                            .map(e -> new RecordHeader(e.getKey(), (byte[]) e.getValue()))
-                            .map(Header.class::cast)
-                            .collect(toCollection(ArrayList::new));
-
-                    expectedHeaderList.add(new RecordHeader(SOURCE_ID, Long.toString(sourceEvent.id()).getBytes()));
-
-                    var expectedHeaders = new RecordHeaders(
-                            expectedHeaderList
-                                    .stream()
-                                    .sorted(comparing(Header::key))
-                                    .toList());
-
                     assertThat(replicatedEvent.headers())
                             .describedAs("replicated event headers")
-                            .isEqualTo(expectedHeaders);
+                            .isEqualTo(expectedHeaders(sourceEvent));
                 });
     }
 
     @Test
     void copiesEventsFromDatabaseToKafkaInMultiplePolls() {
         // Given
-        var lastId = 0;
+        var lastLsn = "0/0";
 
         var worker = new EventReplicatorWorker(
-                jdbcTemplate, kafkaTemplate, meterRegistry, environment, eventSchema, topic, lastId);
+                jdbcTemplate, kafkaTemplate, meterRegistry, environment, eventSchema, topic, lastLsn);
 
         var sourceEvents = IntStream
                 .rangeClosed(1, maxPollRows + 1)
@@ -225,35 +209,19 @@ abstract class EventReplicatorWorkerIT<K> {
                             .describedAs("replicated event timestamp")
                             .isEqualTo(sourceEvent.timestamp().toEpochMilli());
 
-                    var expectedHeaderList = sourceEvent
-                            .metadata()
-                            .entrySet()
-                            .stream()
-                            .map(e -> new RecordHeader(e.getKey(), (byte[]) e.getValue()))
-                            .map(Header.class::cast)
-                            .collect(toCollection(ArrayList::new));
-
-                    expectedHeaderList.add(new RecordHeader(SOURCE_ID, Long.toString(sourceEvent.id()).getBytes()));
-
-                    var expectedHeaders = new RecordHeaders(
-                            expectedHeaderList
-                                    .stream()
-                                    .sorted(comparing(Header::key))
-                                    .toList());
-
                     assertThat(replicatedEvent.headers())
                             .describedAs("replicated event headers")
-                            .isEqualTo(expectedHeaders);
+                            .isEqualTo(expectedHeaders(sourceEvent));
                 });
     }
 
     @Test
-    void resumesCopyingEventsFromGivenId() {
+    void resumesCopyingEventsFromGivenLsn() {
         // Given
-        var lastId = 5;
+        var lastLsn = "0/5";
 
         var worker = new EventReplicatorWorker(
-                jdbcTemplate, kafkaTemplate, meterRegistry, environment, eventSchema, topic, lastId);
+                jdbcTemplate, kafkaTemplate, meterRegistry, environment, eventSchema, topic, lastLsn);
 
         var sourceEvents = IntStream
                 .rangeClosed(1, 11)
@@ -265,7 +233,7 @@ abstract class EventReplicatorWorkerIT<K> {
             insertEvent(topic, event);
         }
 
-        var expectedEvents = sourceEvents.subList(lastId, sourceEvents.size());
+        var expectedEvents = sourceEvents.subList(5, sourceEvents.size());
 
         // When
         worker.run();
@@ -288,39 +256,23 @@ abstract class EventReplicatorWorkerIT<K> {
                             .describedAs("replicated event timestamp")
                             .isEqualTo(sourceEvent.timestamp().toEpochMilli());
 
-                    var expectedHeaderList = sourceEvent
-                            .metadata()
-                            .entrySet()
-                            .stream()
-                            .map(e -> new RecordHeader(e.getKey(), (byte[]) e.getValue()))
-                            .map(Header.class::cast)
-                            .collect(toCollection(ArrayList::new));
-
-                    expectedHeaderList.add(new RecordHeader(SOURCE_ID, Long.toString(sourceEvent.id()).getBytes()));
-
-                    var expectedHeaders = new RecordHeaders(
-                            expectedHeaderList
-                                    .stream()
-                                    .sorted(comparing(Header::key))
-                                    .toList());
-
                     assertThat(replicatedEvent.headers())
                             .describedAs("replicated event headers")
-                            .isEqualTo(expectedHeaders);
+                            .isEqualTo(expectedHeaders(sourceEvent));
                 });
     }
 
     @Test
-    void storesLastReplicatedEventId() {
+    void storesLastReplicatedEventLsn() {
         // Given
-        var lastId = 8;
-        var expectedLastId = 23;
+        var lastLsn = "0/8";
+        var expectedLastLsn = "0/17"; // 23 in hex
 
         var worker = new EventReplicatorWorker(
-                jdbcTemplate, kafkaTemplate, meterRegistry, environment, eventSchema, topic, lastId);
+                jdbcTemplate, kafkaTemplate, meterRegistry, environment, eventSchema, topic, lastLsn);
 
         var sourceEvents = IntStream
-                .rangeClosed(1, expectedLastId)
+                .rangeClosed(1, 23)
                 .boxed()
                 .map(this::testEvent)
                 .toList();
@@ -333,30 +285,29 @@ abstract class EventReplicatorWorkerIT<K> {
         worker.run();
 
         // Then
-        var storedLastId = 0l;
+        String storedLastLsn = null;
 
         var progressRecords = readRecordsFromKafka(PROGRESS_TOPIC);
 
         for (var consumerRecord : progressRecords) {
             if (topic.contains(stringFromBytes(consumerRecord.key()))) {
-                storedLastId = longFromBytes(consumerRecord.value());
+                storedLastLsn = stringFromBytes(consumerRecord.value());
             }
         }
 
-        assertThat(storedLastId)
-                .describedAs("stored last id")
-                .isEqualTo(expectedLastId);
+        assertThat(storedLastLsn)
+                .describedAs("stored last LSN")
+                .isEqualTo(expectedLastLsn);
     }
 
     @Test
     void monitorsReplicationLag() {
         // Given
-        var lastId = 5;
-        var lastSourceId = 13;
+        var lastLsn = "0/5";
         var expectedReplicationLag = 8;
 
         var sourceEvents = IntStream
-                .rangeClosed(1, lastSourceId)
+                .rangeClosed(1, 13)
                 .boxed()
                 .map(this::testEvent)
                 .toList();
@@ -366,7 +317,7 @@ abstract class EventReplicatorWorkerIT<K> {
         }
 
         // When
-        new EventReplicatorWorker(jdbcTemplate, kafkaTemplate, meterRegistry, environment, eventSchema, topic, lastId);
+        new EventReplicatorWorker(jdbcTemplate, kafkaTemplate, meterRegistry, environment, eventSchema, topic, lastLsn);
 
         // Then
         var replicationLag = meterRegistry.find("event.replicator.lag").tag("topic", topic).gauge().value();
@@ -376,14 +327,33 @@ abstract class EventReplicatorWorkerIT<K> {
                 .isEqualTo(expectedReplicationLag);
     }
 
+    @Test
+    void reportsZeroLagWhenNoEventsHaveLsn() {
+        // Given
+        var lastLsn = "0/0";
+
+        // When
+        new EventReplicatorWorker(
+                jdbcTemplate, kafkaTemplate, meterRegistry, environment, eventSchema, topic, lastLsn);
+
+        // Then
+        var replicationLag = meterRegistry.find("event.replicator.lag").tag("topic", topic).gauge().value();
+
+        assertThat(replicationLag)
+                .describedAs("replication lag")
+                .isEqualTo(0);
+    }
+
     private void insertEvent(String topic, EventData event) {
         jdbcTemplate
                 .update(
-                        "INSERT INTO events." + topic + " (key, data, metadata, timestamp) VALUES (?, ?, ?, ?)",
+                        "INSERT INTO events." + topic
+                                + " (key, data, metadata, timestamp, lsn) VALUES (?, ?, ?, ?, ?::pg_lsn)",
                         event.key(),
                         event.data(),
                         MetadataSerializer.serialize(event.metadata()),
-                        event.timestamp().atOffset(ZoneOffset.UTC));
+                        event.timestamp().atOffset(ZoneOffset.UTC),
+                        event.lsn());
     }
 
     private ConsumerRecords<byte[], byte[]> readRecordsFromKafka(String topic) {
@@ -397,16 +367,27 @@ abstract class EventReplicatorWorkerIT<K> {
         }
     }
 
-    private String stringFromBytes(byte[] bytes) {
-        return new String(bytes, StandardCharsets.UTF_8);
+    private RecordHeaders expectedHeaders(EventData sourceEvent) {
+        var headerList = sourceEvent
+                .metadata()
+                .entrySet()
+                .stream()
+                .map(e -> new RecordHeader(e.getKey(), (byte[]) e.getValue()))
+                .map(Header.class::cast)
+                .collect(toCollection(ArrayList::new));
+
+        headerList.add(new RecordHeader(SOURCE_ID, Long.toString(sourceEvent.id()).getBytes()));
+        headerList.add(new RecordHeader(SOURCE_LSN, sourceEvent.lsn().getBytes()));
+
+        return new RecordHeaders(
+                headerList
+                        .stream()
+                        .sorted(comparing(Header::key))
+                        .toList());
     }
 
-    private long longFromBytes(byte[] bytes) {
-        return ByteBuffer
-                .allocate(Long.BYTES)
-                .put(bytes)
-                .flip()
-                .getLong();
+    private String stringFromBytes(byte[] bytes) {
+        return new String(bytes, StandardCharsets.UTF_8);
     }
 
     private EventData testEvent(int id) {
@@ -418,7 +399,8 @@ abstract class EventReplicatorWorkerIT<K> {
                         "dTest", "meta_value".getBytes(),
                         "zTest", UUID.randomUUID().toString().getBytes(),
                         "bTest", Long.toString(id).getBytes()),
-                Instant.now());
+                Instant.now(),
+                "0/" + Integer.toHexString(id).toUpperCase());
     }
 
     protected abstract String getKeyType();
@@ -429,6 +411,7 @@ abstract class EventReplicatorWorkerIT<K> {
         return key.toString().getBytes();
     }
 
-    protected record EventData(long id, Object key, byte[] data, Map<String, Object> metadata, Instant timestamp) {
+    protected record EventData(long id, Object key, byte[] data, Map<String, Object> metadata, Instant timestamp,
+            String lsn) {
     }
 }

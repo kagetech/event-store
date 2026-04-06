@@ -27,7 +27,6 @@ package tech.kage.event.replicator.entity;
 
 import static java.util.stream.Collectors.toList;
 
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.HashMap;
@@ -157,18 +156,18 @@ class EventReplicator {
         // create progress Kafka topic
         kafkaAdmin.createOrModifyTopics(TopicBuilder.name(PROGRESS_TOPIC).partitions(1).compact().build());
 
-        log.info("Reading last replicated event ids...");
+        log.info("Reading last replicated event LSNs...");
 
-        // read last replicated event ids (map topic->id)
-        var lastIds = readLastIds(getReplicatedTopics(jdbcTemplate), consumerFactory);
+        // read last replicated event LSNs (map topic->lsn)
+        var lastLsns = readLastLsns(getReplicatedTopics(jdbcTemplate), consumerFactory);
 
         log.info("Scheduling workers...");
 
         // for each replicated topic
-        for (var lastId : lastIds.entrySet()) {
+        for (var lastLsn : lastLsns.entrySet()) {
             // create replicated Kafka topic
             kafkaAdmin.createOrModifyTopics(
-                    TopicBuilder.name(lastId.getKey()).config(TopicConfig.RETENTION_MS_CONFIG, "-1").build());
+                    TopicBuilder.name(lastLsn.getKey()).config(TopicConfig.RETENTION_MS_CONFIG, "-1").build());
 
             // schedule a new worker for the replicated topic
             taskScheduler.scheduleWithFixedDelay(
@@ -178,8 +177,8 @@ class EventReplicator {
                             meterRegistry,
                             environment,
                             eventSchema,
-                            lastId.getKey(),
-                            lastId.getValue()),
+                            lastLsn.getKey(),
+                            lastLsn.getValue()),
                     Duration.ofMillis(pollInterval));
         }
 
@@ -204,21 +203,20 @@ class EventReplicator {
     }
 
     /**
-     * Reads a list of replicated topics by reading a list of tables with
-     * {@code TOPIC_SUFFIX} suffix in the {@code eventSchema} database schema.
+     * Reads the last replicated LSNs for each topic from the progress Kafka topic.
      * 
      * @param replicatedTopics a list of replicated topics
      * @param consumerFactory  an instance of {@link ConsumerFactory}
      * 
-     * @return map of topics with the ids of the last replicated events
+     * @return map of topics with the LSNs of the last replicated events
      */
-    private Map<String, Long> readLastIds(
+    private Map<String, String> readLastLsns(
             List<String> replicatedTopics,
             ConsumerFactory<byte[], byte[]> consumerFactory) {
-        var lastIds = new HashMap<String, Long>();
+        var lastLsns = new HashMap<String, String>();
 
         for (var topic : replicatedTopics) {
-            lastIds.put(topic, 0l);
+            lastLsns.put(topic, "0/0");
         }
 
         var topicPartition = List.of(new TopicPartition(PROGRESS_TOPIC, 0));
@@ -241,7 +239,7 @@ class EventReplicator {
                 var topic = stringFromBytes(consumerRecord.key());
 
                 if (replicatedTopics.contains(topic)) {
-                    lastIds.put(topic, longFromBytes(consumerRecord.value()));
+                    lastLsns.put(topic, stringFromBytes(consumerRecord.value()));
                 }
             }
 
@@ -252,7 +250,7 @@ class EventReplicator {
             }
         }
 
-        return lastIds;
+        return lastLsns;
     }
 
     private byte[] stringToBytes(String str) {
@@ -261,13 +259,5 @@ class EventReplicator {
 
     private String stringFromBytes(byte[] bytes) {
         return new String(bytes, StandardCharsets.UTF_8);
-    }
-
-    private long longFromBytes(byte[] bytes) {
-        return ByteBuffer
-                .allocate(Long.BYTES)
-                .put(bytes)
-                .flip()
-                .getLong();
     }
 }
