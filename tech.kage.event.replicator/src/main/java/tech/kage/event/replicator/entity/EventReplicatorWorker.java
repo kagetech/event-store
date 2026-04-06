@@ -27,8 +27,8 @@ package tech.kage.event.replicator.entity;
 
 import static java.util.Comparator.comparing;
 import static tech.kage.event.EventStore.SOURCE_ID;
+import static tech.kage.event.EventStore.SOURCE_LSN;
 
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.util.List;
@@ -59,15 +59,15 @@ class EventReplicatorWorker implements Runnable {
     private static final String SELECT_EVENT_SQL = """
                 SELECT *
                 FROM %s.%s
-                WHERE id > %s
-                ORDER BY id
+                WHERE lsn IS NOT NULL AND lsn > '%s'::pg_lsn
+                ORDER BY lsn
                 LIMIT %s
             """;
 
     /**
-     * SQL query used for selecting the id of the last event.
+     * SQL query used for computing the replication lag as WAL byte distance.
      */
-    private static final String SELECT_LAST_EVENT_ID_SQL = "SELECT last_value FROM %s.%s_id_seq";
+    private static final String SELECT_LAG_SQL = "SELECT MAX(lsn) - '%s'::pg_lsn FROM %s.%s WHERE lsn IS NOT NULL";
 
     /**
      * Configuration property defining the maximum number of events replicated in
@@ -83,7 +83,7 @@ class EventReplicatorWorker implements Runnable {
     /**
      * The description of Micrometer event replication lag gauge.
      */
-    private static final String MICROMETER_LAG_GAUGE_DESC = "The difference between the latest event in the source topic and the latest replicated event";
+    private static final String MICROMETER_LAG_GAUGE_DESC = "The WAL byte distance between the latest event in the source topic and the latest replicated event";
 
     /**
      * The name of Micrometer topic tag.
@@ -97,7 +97,7 @@ class EventReplicatorWorker implements Runnable {
     private final String replicatedTopic;
     private final int maxRows;
 
-    private long lastId;
+    private String lastLsn;
 
     /**
      * Constructs a new {@link EventReplicatorWorker} instance.
@@ -108,7 +108,7 @@ class EventReplicatorWorker implements Runnable {
      * @param environment     an instance of {@link Environment}
      * @param eventSchema     the name of the event schema
      * @param replicatedTopic the name of the replicated topic
-     * @param lastId          the id of the last replicated event in the replicated
+     * @param lastLsn         the LSN of the last replicated event in the replicated
      *                        topic
      */
     EventReplicatorWorker(
@@ -118,7 +118,7 @@ class EventReplicatorWorker implements Runnable {
             Environment environment,
             String eventSchema,
             String replicatedTopic,
-            long lastId) {
+            String lastLsn) {
         this.jdbcTemplate = jdbcTemplate;
         this.kafkaTemplate = kafkaTemplate;
 
@@ -126,7 +126,7 @@ class EventReplicatorWorker implements Runnable {
         this.replicatedTopic = replicatedTopic;
         this.maxRows = environment.getProperty(MAX_ROWS_PROPERTY, Integer.class, 100);
 
-        this.lastId = lastId;
+        this.lastLsn = lastLsn;
 
         Gauge
                 .builder(MICROMETER_LAG_GAUGE_NAME, this, worker -> worker.computeLag())
@@ -141,10 +141,10 @@ class EventReplicatorWorker implements Runnable {
     @Override
     public void run() {
         while (true) {
-            var updatedLastId = pollAndSendBatch(eventSchema, replicatedTopic, lastId, maxRows);
+            var updatedLastLsn = pollAndSendBatch(eventSchema, replicatedTopic, lastLsn, maxRows);
 
-            if (updatedLastId != null) {
-                lastId = updatedLastId;
+            if (updatedLastLsn != null) {
+                lastLsn = updatedLastLsn;
             } else {
                 // no more events found so we are done
                 return;
@@ -158,15 +158,15 @@ class EventReplicatorWorker implements Runnable {
      * 
      * @param schema    the name of the event schema
      * @param topic     the name of the replicated topic
-     * @param lastId    the id of the last replicated event in the replicated
+     * @param lastLsn   the LSN of the last replicated event in the replicated
      *                  topic
      * @param batchSize maximum number of events replicated in one batch.
      * 
-     * @return id of the last replicated event or null if no events were found
+     * @return LSN of the last replicated event or null if no events were found
      */
-    private Long pollAndSendBatch(String schema, String topic, long lastId, int batchSize) {
+    private String pollAndSendBatch(String schema, String topic, String lastLsn, int batchSize) {
         // select the events for replication
-        var eventList = jdbcTemplate.queryForList(SELECT_EVENT_SQL.formatted(schema, topic, lastId, batchSize));
+        var eventList = jdbcTemplate.queryForList(SELECT_EVENT_SQL.formatted(schema, topic, lastLsn, batchSize));
 
         if (eventList.isEmpty()) {
             return null;
@@ -174,25 +174,26 @@ class EventReplicatorWorker implements Runnable {
 
         // send events to Kafka and update progress topic in one transaction
         return kafkaTemplate.executeInTransaction(kafka -> {
-            Long newLastId = null;
+            String newLastLsn = null;
 
             for (var event : eventList) {
-                newLastId = (Long) event.get("id");
+                var id = (Long) event.get("id");
+                newLastLsn = event.get("lsn").toString();
 
                 var key = event.get("key");
                 var data = (byte[]) event.get("data");
                 var metadata = (byte[]) event.get("metadata");
                 var timestamp = (Timestamp) event.get("timestamp");
-                var headers = toHeaders(newLastId, metadata);
+                var headers = toHeaders(id, newLastLsn, metadata);
 
                 // send event to Kafka topic
                 kafka.send(new ProducerRecord<>(topic, null, timestamp.getTime(), serializeKey(key), data, headers));
             }
 
             // update progress topic
-            kafka.send(EventReplicator.PROGRESS_TOPIC, stringToBytes(replicatedTopic), longToBytes(newLastId));
+            kafka.send(EventReplicator.PROGRESS_TOPIC, stringToBytes(replicatedTopic), stringToBytes(newLastLsn));
 
-            return newLastId;
+            return newLastLsn;
         });
     }
 
@@ -204,14 +205,16 @@ class EventReplicatorWorker implements Runnable {
         return stringToBytes(key.toString());
     }
 
-    private List<Header> toHeaders(Long id, byte[] metadata) {
+    private List<Header> toHeaders(Long id, String lsn, byte[] metadata) {
         return Stream
                 .concat(
-                        Stream.of(Map.entry(SOURCE_ID, Long.toString(id).getBytes())),
+                        Stream.of(
+                                Map.entry(SOURCE_ID, Long.toString(id).getBytes()),
+                                Map.entry(SOURCE_LSN, lsn.getBytes())),
                         MetadataSerializer.deserialize(metadata).entrySet().stream())
                 .map(e -> new RecordHeader(e.getKey().toString(), (byte[]) e.getValue()))
                 .map(Header.class::cast)
-                .sorted(comparing(Header::key)) // sort again after adding the id header
+                .sorted(comparing(Header::key)) // sort again after adding the id and lsn headers
                 .toList();
     }
 
@@ -219,24 +222,17 @@ class EventReplicatorWorker implements Runnable {
         return str.getBytes(StandardCharsets.UTF_8);
     }
 
-    private byte[] longToBytes(long val) {
-        return ByteBuffer
-                .allocate(Long.BYTES)
-                .putLong(val)
-                .array();
-    }
-
     /**
-     * Computes the event replication lag, i.e. the difference between the latest
+     * Computes the event replication lag as WAL byte distance between the latest
      * event in the source topic and the latest replicated event.
      * 
-     * @return computed replication lag
+     * @return computed replication lag in WAL bytes
      */
     private double computeLag() {
-        var lastSourceId = jdbcTemplate.queryForObject(
-                SELECT_LAST_EVENT_ID_SQL.formatted(eventSchema, replicatedTopic),
+        var lag = jdbcTemplate.queryForObject(
+                SELECT_LAG_SQL.formatted(lastLsn, eventSchema, replicatedTopic),
                 Long.class);
 
-        return lastSourceId - lastId;
+        return lag != null ? lag : 0;
     }
 }

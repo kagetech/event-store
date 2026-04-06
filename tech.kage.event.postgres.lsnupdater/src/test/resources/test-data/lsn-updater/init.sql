@@ -9,4 +9,8 @@ CREATE TABLE IF NOT EXISTS events.test_events (
     lsn pg_lsn
 );
 
-CREATE INDEX IF NOT EXISTS test_events_lsn_idx ON events.test_events (lsn);
+CREATE PUBLICATION event_lsn_publication
+FOR TABLES IN SCHEMA events
+WITH (publish = 'insert');
+
+SELECT pg_create_logical_replication_slot('event_lsn_updater', 'pgoutput');

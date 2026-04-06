@@ -18,8 +18,11 @@ CREATE TABLE IF NOT EXISTS events.test_events (
     key uuid NOT NULL,
     data bytea NOT NULL,
     metadata bytea,
-    timestamp timestamp with time zone NOT NULL
+    timestamp timestamp with time zone NOT NULL,
+    lsn pg_lsn
 );
+
+CREATE INDEX IF NOT EXISTS test_events_lsn_idx ON events.test_events (lsn);
 ```
 
 **Maven configuration:**
@@ -86,7 +89,7 @@ eventStore.save("sample_encrypted_topic", event, encryptionKey);
 
 **Replicate events to Kafka**
 
-See [Event Replicator](tech.kage.event.replicator).
+Replication requires the [LSN Updater](tech.kage.event.postgres.lsnupdater) and the [Event Replicator](tech.kage.event.replicator) to be running. The LSN Updater populates the `lsn` column via PostgreSQL logical replication, and the Event Replicator copies events to Kafka topics ordered by their WAL position.
 
 **Process events**
 

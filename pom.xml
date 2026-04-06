@@ -82,6 +82,7 @@
         <module>tech.kage.event.kafka.reactor</module>
         <module>tech.kage.event.kafka.streams</module>
         <module>tech.kage.event.postgres</module>
+        <module>tech.kage.event.postgres.lsnupdater</module>
         <module>tech.kage.event.replicator</module>
     </modules>
 

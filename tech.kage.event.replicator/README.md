@@ -2,7 +2,9 @@
 
 Replicator of events from PostgreSQL relational tables to Apache Kafka topics with exactly-once semantics (EOS).
 
-Reads topic tables in `event.replicator.event.schema` schema and copies events to Kafka topics with the same name. Stores replication progress in a Kafka topic. Uses Kafka transactions to guarantee EOS.
+Reads topic tables in `event.replicator.event.schema` schema and copies events to Kafka topics with the same name. Orders events by their WAL position (`lsn` column) to preserve true commit order. Stores replication progress in a Kafka topic. Uses Kafka transactions to guarantee EOS.
+
+Requires the [LSN Updater](../tech.kage.event.postgres.lsnupdater) to be running. The LSN Updater populates the `lsn` column via PostgreSQL logical replication. Events without an `lsn` value are not replicated.
 
 ## Getting started
 
@@ -16,8 +18,11 @@ CREATE TABLE IF NOT EXISTS events.test_events (
     key uuid NOT NULL,
     data bytea NOT NULL,
     metadata bytea,
-    timestamp timestamp with time zone NOT NULL
+    timestamp timestamp with time zone NOT NULL,
+    lsn pg_lsn
 );
+
+CREATE INDEX IF NOT EXISTS test_events_lsn_idx ON events.test_events (lsn);
 ```
 
 run:

@@ -46,6 +46,12 @@ public interface EventStore<K, V extends SpecificRecord> {
     static final String SOURCE_ID = "id";
 
     /**
+     * Constant representing the event LSN (Log Sequence Number) in the source
+     * database.
+     */
+    static final String SOURCE_LSN = "lsn";
+
+    /**
      * Constant representing the encryption key identifier.
      */
     static final String ENCRYPTION_KEY_ID = "kid";
