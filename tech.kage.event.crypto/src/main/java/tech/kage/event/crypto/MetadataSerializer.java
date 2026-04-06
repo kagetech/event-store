@@ -31,7 +31,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.SequencedMap;
 import java.util.TreeMap;
@@ -60,7 +59,7 @@ public class MetadataSerializer {
     private static final DatumWriter<Map<String, ByteBuffer>> writer = new GenericDatumWriter<>(METADATA_SCHEMA);
 
     private static final DecoderFactory decoderFactory = DecoderFactory.get();
-    private static final DatumReader<SequencedMap<Utf8, ByteBuffer>> reader = new GenericDatumReader<>(METADATA_SCHEMA);
+    private static final DatumReader<Map<Utf8, ByteBuffer>> reader = new GenericDatumReader<>(METADATA_SCHEMA);
 
     private MetadataSerializer() {
         // hide the default constructor
@@ -103,11 +102,11 @@ public class MetadataSerializer {
             var decoder = decoderFactory.binaryDecoder(metadata, null);
 
             return reader
-                    .read(new LinkedHashMap<>(), decoder) // use LinkedHashMap to keep the order of metadata items
+                    .read(null, decoder)
                     .entrySet()
                     .stream()
                     .map(entry -> Map.entry(entry.getKey().toString(), entry.getValue().array()))
-                    .collect(toMap(Map.Entry::getKey, Map.Entry::getValue, (e1, e2) -> e1, LinkedHashMap::new));
+                    .collect(toMap(Map.Entry::getKey, Map.Entry::getValue, (e1, e2) -> e1, TreeMap::new));
         } catch (IOException e) {
             throw new UncheckedIOException("Unable to deserialize metadata: " + metadata, e);
         }
