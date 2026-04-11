@@ -31,13 +31,13 @@ CREATE INDEX IF NOT EXISTS test_events_lsn_idx ON events.test_events (lsn);
 <dependency>
     <groupId>tech.kage.event</groupId>
     <artifactId>tech.kage.event</artifactId>
-    <version>1.3.1</version>
+    <version>1.4.0</version>
 </dependency>
 
 <dependency>
     <groupId>tech.kage.event</groupId>
     <artifactId>tech.kage.event.postgres</artifactId>
-    <version>1.3.1</version>
+    <version>1.4.0</version>
 </dependency>
 ```
 
