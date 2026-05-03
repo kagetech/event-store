@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023-2025, Dariusz Szpakowski
+ * Copyright (c) 2023-2026, Dariusz Szpakowski
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -50,6 +50,13 @@ import tech.kage.event.crypto.MetadataSerializer;
  * Worker component responsible for replicating events from a single event table
  * to a single Kafka topic.
  * 
+ * <p>
+ * The replication cursor is a {@code (lsn, id)} pair compared via Postgres
+ * row-value semantics. The {@code id} component is required because rows
+ * inserted in a single transaction share the same commit LSN; an LSN-only
+ * cursor would silently skip same-LSN siblings whenever a transaction's row
+ * count crosses the batch {@code LIMIT}.
+ * 
  * @author Dariusz Szpakowski
  */
 class EventReplicatorWorker implements Runnable {
@@ -59,8 +66,8 @@ class EventReplicatorWorker implements Runnable {
     private static final String SELECT_EVENT_SQL = """
                 SELECT *
                 FROM %s.%s
-                WHERE lsn IS NOT NULL AND lsn > '%s'::pg_lsn
-                ORDER BY lsn
+                WHERE lsn IS NOT NULL AND (lsn, id) > ('%s'::pg_lsn, %d)
+                ORDER BY lsn, id
                 LIMIT %s
             """;
 
@@ -97,7 +104,7 @@ class EventReplicatorWorker implements Runnable {
     private final String replicatedTopic;
     private final int maxRows;
 
-    private String lastLsn;
+    private Cursor lastCursor;
 
     /**
      * Constructs a new {@link EventReplicatorWorker} instance.
@@ -108,8 +115,8 @@ class EventReplicatorWorker implements Runnable {
      * @param environment     an instance of {@link Environment}
      * @param eventSchema     the name of the event schema
      * @param replicatedTopic the name of the replicated topic
-     * @param lastLsn         the LSN of the last replicated event in the replicated
-     *                        topic
+     * @param lastCursor      the cursor of the last replicated event in the
+     *                        replicated topic
      */
     EventReplicatorWorker(
             JdbcTemplate jdbcTemplate,
@@ -118,7 +125,7 @@ class EventReplicatorWorker implements Runnable {
             Environment environment,
             String eventSchema,
             String replicatedTopic,
-            String lastLsn) {
+            Cursor lastCursor) {
         this.jdbcTemplate = jdbcTemplate;
         this.kafkaTemplate = kafkaTemplate;
 
@@ -126,7 +133,7 @@ class EventReplicatorWorker implements Runnable {
         this.replicatedTopic = replicatedTopic;
         this.maxRows = environment.getProperty(MAX_ROWS_PROPERTY, Integer.class, 100);
 
-        this.lastLsn = lastLsn;
+        this.lastCursor = lastCursor;
 
         Gauge
                 .builder(MICROMETER_LAG_GAUGE_NAME, this, worker -> worker.computeLag())
@@ -141,10 +148,10 @@ class EventReplicatorWorker implements Runnable {
     @Override
     public void run() {
         while (true) {
-            var updatedLastLsn = pollAndSendBatch(eventSchema, replicatedTopic, lastLsn, maxRows);
+            var updatedLastCursor = pollAndSendBatch(eventSchema, replicatedTopic, lastCursor, maxRows);
 
-            if (updatedLastLsn != null) {
-                lastLsn = updatedLastLsn;
+            if (updatedLastCursor != null) {
+                lastCursor = updatedLastCursor;
             } else {
                 // no more events found so we are done
                 return;
@@ -156,17 +163,18 @@ class EventReplicatorWorker implements Runnable {
      * Polls the event table and sends read events to the Kafka topic with the same
      * name.
      * 
-     * @param schema    the name of the event schema
-     * @param topic     the name of the replicated topic
-     * @param lastLsn   the LSN of the last replicated event in the replicated
-     *                  topic
-     * @param batchSize maximum number of events replicated in one batch.
+     * @param schema     the name of the event schema
+     * @param topic      the name of the replicated topic
+     * @param lastCursor the cursor of the last replicated event in the replicated
+     *                   topic
+     * @param batchSize  maximum number of events replicated in one batch.
      * 
-     * @return LSN of the last replicated event or null if no events were found
+     * @return cursor of the last replicated event or null if no events were found
      */
-    private String pollAndSendBatch(String schema, String topic, String lastLsn, int batchSize) {
+    private Cursor pollAndSendBatch(String schema, String topic, Cursor lastCursor, int batchSize) {
         // select the events for replication
-        var eventList = jdbcTemplate.queryForList(SELECT_EVENT_SQL.formatted(schema, topic, lastLsn, batchSize));
+        var eventList = jdbcTemplate.queryForList(
+                SELECT_EVENT_SQL.formatted(schema, topic, lastCursor.lsn(), lastCursor.id(), batchSize));
 
         if (eventList.isEmpty()) {
             return null;
@@ -174,26 +182,29 @@ class EventReplicatorWorker implements Runnable {
 
         // send events to Kafka and update progress topic in one transaction
         return kafkaTemplate.executeInTransaction(kafka -> {
-            String newLastLsn = null;
+            Cursor updatedLastCursor = null;
 
             for (var event : eventList) {
                 var id = (Long) event.get("id");
-                newLastLsn = event.get("lsn").toString();
+                var lsn = event.get("lsn").toString();
+
+                updatedLastCursor = new Cursor(lsn, id);
 
                 var key = event.get("key");
                 var data = (byte[]) event.get("data");
                 var metadata = (byte[]) event.get("metadata");
                 var timestamp = (Timestamp) event.get("timestamp");
-                var headers = toHeaders(id, newLastLsn, metadata);
+                var headers = toHeaders(id, lsn, metadata);
 
                 // send event to Kafka topic
                 kafka.send(new ProducerRecord<>(topic, null, timestamp.getTime(), serializeKey(key), data, headers));
             }
 
             // update progress topic
-            kafka.send(EventReplicator.PROGRESS_TOPIC, stringToBytes(replicatedTopic), stringToBytes(newLastLsn));
+            kafka.send(EventReplicator.PROGRESS_TOPIC, stringToBytes(replicatedTopic),
+                    stringToBytes(updatedLastCursor.toProgressValue()));
 
-            return newLastLsn;
+            return updatedLastCursor;
         });
     }
 
@@ -230,9 +241,58 @@ class EventReplicatorWorker implements Runnable {
      */
     private double computeLag() {
         var lag = jdbcTemplate.queryForObject(
-                SELECT_LAG_SQL.formatted(lastLsn, eventSchema, replicatedTopic),
+                SELECT_LAG_SQL.formatted(lastCursor.lsn(), eventSchema, replicatedTopic),
                 Long.class);
 
         return lag != null ? lag : 0;
+    }
+
+    /**
+     * Replication cursor pointing at the last successfully replicated row.
+     *
+     * <p>
+     * Persisted to the progress Kafka topic as {@code "<lsn>:<id>"}. The pair is
+     * compared via Postgres row-value semantics so consumers resume correctly
+     * across same-LSN siblings produced by a single transaction.
+     *
+     * @param lsn the row's commit LSN in canonical Postgres text form (e.g.
+     *            {@code "0/12A4B5C"})
+     * @param id  the row's bigserial identifier
+     */
+    record Cursor(String lsn, long id) {
+        /**
+         * Initial cursor value used for a topic with no recorded progress.
+         */
+        static final Cursor INITIAL = new Cursor("0/0", 0L);
+
+        /**
+         * Encodes this cursor for the progress Kafka topic.
+         * 
+         * @return canonical {@code "<lsn>:<id>"} text form of this cursor
+         */
+        String toProgressValue() {
+            return lsn + ":" + id;
+        }
+
+        /**
+         * Decodes a cursor from a progress-topic value.
+         * 
+         * @param value progress-topic value in the {@code "<lsn>:<id>"} form
+         * 
+         * @return cursor decoded from {@code value}
+         * 
+         * @throws IllegalStateException if the value is not in the expected
+         *                               {@code "<lsn>:<id>"} form
+         */
+        static Cursor fromProgressValue(String value) {
+            var parts = value.split(":");
+
+            if (parts.length != 2) {
+                throw new IllegalStateException(
+                        "Invalid progress-topic cursor value (expected 'lsn:id'): " + value);
+            }
+
+            return new Cursor(parts[0], Long.parseLong(parts[1]));
+        }
     }
 }

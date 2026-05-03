@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023-2025, Dariusz Szpakowski
+ * Copyright (c) 2023-2026, Dariusz Szpakowski
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -73,6 +73,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.kafka.KafkaContainer;
 
 import io.micrometer.core.instrument.MeterRegistry;
+import tech.kage.event.replicator.entity.EventReplicatorWorker.Cursor;
 
 /**
  * Integration tests for {@link EventReplicator}.
@@ -115,7 +116,7 @@ class EventReplicatorIT {
     @MockitoBean
     TaskScheduler taskScheduler;
 
-    Map<String, String> topicLastLsns;
+    Map<String, Cursor> topicLastCursors;
 
     @Container
     @ServiceConnection
@@ -133,16 +134,16 @@ class EventReplicatorIT {
 
     @BeforeEach
     void setUp(@Value("classpath:/test-data/events/ddl.sql") Resource ddl) throws IOException {
-        topicLastLsns = IntStream
+        topicLastCursors = IntStream
                 .rangeClosed(1, 10)
                 .boxed()
                 .map(id -> Map.entry(
                         "test_" + id + System.currentTimeMillis() + "_events",
-                        "0/" + Integer.toHexString(id)))
+                        new Cursor("0/" + Integer.toHexString(id), id.longValue())))
                 .collect(toMap(Map.Entry::getKey, Map.Entry::getValue));
 
         // create source event tables
-        for (var topic : topicLastLsns.keySet()) {
+        for (var topic : topicLastCursors.keySet()) {
             jdbcTemplate.execute(
                     ddl.getContentAsString(StandardCharsets.UTF_8)
                             .replace("<<topic_name>>", topic)
@@ -153,7 +154,7 @@ class EventReplicatorIT {
     @AfterEach
     void tearDown() {
         // drop source event tables
-        for (var topic : topicLastLsns.keySet()) {
+        for (var topic : topicLastCursors.keySet()) {
             jdbcTemplate.execute("drop table events." + topic);
         }
     }
@@ -169,7 +170,7 @@ class EventReplicatorIT {
                 pollInterval, true);
 
         // Then
-        assertThatCode(() -> kafkaAdmin.describeTopics(topicLastLsns.keySet().toArray(String[]::new)))
+        assertThatCode(() -> kafkaAdmin.describeTopics(topicLastCursors.keySet().toArray(String[]::new)))
                 .doesNotThrowAnyException();
     }
 
@@ -179,7 +180,7 @@ class EventReplicatorIT {
         // Given
         given(lockManager.acquireLock()).willReturn(true);
 
-        var expectedScheduledTasksCount = topicLastLsns.size() + 1; // include lock monitor
+        var expectedScheduledTasksCount = topicLastCursors.size() + 1; // include lock monitor
         var expectedDelay = Duration.ofMillis(pollInterval);
 
         // When
@@ -205,23 +206,23 @@ class EventReplicatorIT {
 
         // store initial progress
         kafkaTemplate.executeInTransaction(kafkaTransaction -> {
-            for (var topicEntry : topicLastLsns.entrySet()) {
+            for (var topicEntry : topicLastCursors.entrySet()) {
                 kafkaTransaction.send(
                         PROGRESS_TOPIC,
                         stringToBytes(topicEntry.getKey()),
-                        stringToBytes(topicEntry.getValue()));
+                        stringToBytes(topicEntry.getValue().toProgressValue()));
             }
 
             return 0;
         });
 
-        var expectedTopicLastLsns = topicLastLsns
+        var expectedTopicLastCursors = topicLastCursors
                 .entrySet()
                 .stream()
                 .map(topicEntry -> new Tuple(topicEntry.getKey(), topicEntry.getValue()))
                 .toList();
 
-        var expectedScheduledTasksCount = topicLastLsns.size() + 1; // include lock monitor
+        var expectedScheduledTasksCount = topicLastCursors.size() + 1; // include lock monitor
         var expectedDelay = Duration.ofMillis(pollInterval);
 
         // When
@@ -243,12 +244,40 @@ class EventReplicatorIT {
 
         assertThat(testedTasks)
                 .describedAs("scheduled tasks")
-                .extracting("replicatedTopic", "lastLsn")
-                .containsExactlyInAnyOrderElementsOf(expectedTopicLastLsns);
+                .extracting("replicatedTopic", "lastCursor")
+                .containsExactlyInAnyOrderElementsOf(expectedTopicLastCursors);
     }
 
     @Test
     @Order(4)
+    void throwsExceptionWhenProgressTopicHasMalformedValue() {
+        // Given
+        given(lockManager.acquireLock()).willReturn(true);
+
+        var someTopic = topicLastCursors.keySet().iterator().next();
+
+        kafkaTemplate.executeInTransaction(kafkaTransaction -> {
+            kafkaTransaction.send(PROGRESS_TOPIC, stringToBytes(someTopic), stringToBytes("malformed-no-colon"));
+
+            return 0;
+        });
+
+        // When
+        var thrown = assertThrows(
+                Throwable.class,
+                () -> eventReplicator.init(kafkaAdmin, jdbcTemplate, lockManager, consumerFactory, meterRegistry,
+                        environment, pollInterval, true));
+
+        // Then
+        assertThat(thrown)
+                .describedAs("thrown exception")
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Invalid progress-topic cursor value")
+                .hasMessageContaining("malformed-no-colon");
+    }
+
+    @Test
+    @Order(5)
     void throwsExceptionWhenProgressTopicIsFilled(
             @Value("${spring.kafka.consumer.max-poll-records}") int kafkaConsumerMaxPollRecords) {
         // Given
@@ -257,7 +286,7 @@ class EventReplicatorIT {
         // progress topic is filled
         kafkaTemplate.executeInTransaction(kafkaTransaction -> {
             for (var i = 0; i <= kafkaConsumerMaxPollRecords; i++) {
-                kafkaTransaction.send(PROGRESS_TOPIC, stringToBytes("test_topic"), stringToBytes("0/0"));
+                kafkaTransaction.send(PROGRESS_TOPIC, stringToBytes("test_topic"), stringToBytes("0/0:0"));
             }
 
             return 0;
@@ -277,7 +306,7 @@ class EventReplicatorIT {
     }
 
     @Test
-    @Order(5)
+    @Order(6)
     void throwsExceptionWhenLockCannotBeAcquired() {
         // Given
         given(lockManager.acquireLock()).willReturn(false);

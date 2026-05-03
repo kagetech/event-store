@@ -57,9 +57,9 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-import tech.kage.event.postgres.lsnupdater.entity.PgOutputMessageParser.InsertInfo;
-import tech.kage.event.postgres.lsnupdater.entity.PgOutputMessageParser.MessageInfo;
-import tech.kage.event.postgres.lsnupdater.entity.PgOutputMessageParser.MessageType;
+import tech.kage.event.postgres.lsnupdater.entity.PgOutputMessageParser.BeginMessage;
+import tech.kage.event.postgres.lsnupdater.entity.PgOutputMessageParser.CommitMessage;
+import tech.kage.event.postgres.lsnupdater.entity.PgOutputMessageParser.InsertMessage;
 import tech.kage.event.postgres.lsnupdater.entity.PgOutputMessageParser.RelationInfo;
 
 /**
@@ -129,19 +129,18 @@ class LsnUpdaterErrorHandlingIT {
     }
 
     @Test
-    void terminatesProcessWhenInsertHasNullId() {
+    void terminatesProcessWhenInsertReceivedOutsideOfTransaction() {
         // Given
         given(parser.parse(any())).willAnswer(invocation -> {
             ByteBuffer buf = invocation.getArgument(0);
             byte type = buf.get(buf.position());
 
             if (type == 'I') {
-                return new MessageInfo(
-                        MessageType.INSERT,
-                        new RelationInfo(1, "events", "test_events"),
-                        new InsertInfo(1, null));
+                return new InsertMessage(new RelationInfo(1, "events", "test_events"), 123L);
             }
 
+            // Skip BEGIN/COMMIT so currentTxnLsn stays null and the INSERT
+            // hits the "no BEGIN seen" guard.
             return null;
         });
 
@@ -166,18 +165,70 @@ class LsnUpdaterErrorHandlingIT {
             ByteBuffer buf = invocation.getArgument(0);
             byte type = buf.get(buf.position());
 
-            if (type == 'I') {
-                return new MessageInfo(
-                        MessageType.INSERT,
-                        new RelationInfo(1, "events", "test_events"),
-                        new InsertInfo(1, 123L));
-            }
-
-            return null;
+            return switch ((char) type) {
+                case 'B' -> new BeginMessage(0x100L, 0L, 1);
+                case 'C' -> new CommitMessage((byte) 0, 0x100L, 0x108L, 0L);
+                case 'I' -> new InsertMessage(new RelationInfo(1, "events", "test_events"), 123L);
+                default -> null;
+            };
         });
 
         // When
         insertTestEvent("44444444-4444-4444-4444-444444444444");
+
+        // Then
+        await()
+                .atMost(Duration.ofSeconds(10))
+                .pollInterval(Duration.ofMillis(100))
+                .untilAsserted(() -> assertThat(lsnUpdater.getLastExitCode())
+                        .describedAs("exit code")
+                        .isEqualTo(1));
+    }
+
+    @Test
+    void terminatesProcessWhenCommitReceivedOutsideOfTransaction() {
+        // Given
+        given(parser.parse(any())).willAnswer(invocation -> {
+            ByteBuffer buf = invocation.getArgument(0);
+            byte type = buf.get(buf.position());
+
+            // Skip BEGIN so currentTxnLsn stays null and the COMMIT
+            // hits the "no open transaction" guard.
+            return switch ((char) type) {
+                case 'C' -> new CommitMessage((byte) 0, 0x100L, 0x108L, 0L);
+                default -> null;
+            };
+        });
+
+        // When
+        insertTestEvent("55555555-5555-5555-5555-555555555555");
+
+        // Then
+        await()
+                .atMost(Duration.ofSeconds(10))
+                .pollInterval(Duration.ofMillis(100))
+                .untilAsserted(() -> assertThat(lsnUpdater.getLastExitCode())
+                        .describedAs("exit code")
+                        .isEqualTo(1));
+    }
+
+    @Test
+    void terminatesProcessWhenCommitLsnDoesNotMatchOpenTransaction() {
+        // Given
+        given(parser.parse(any())).willAnswer(invocation -> {
+            ByteBuffer buf = invocation.getArgument(0);
+            byte type = buf.get(buf.position());
+
+            return switch ((char) type) {
+                case 'B' -> new BeginMessage(0x100L, 0L, 1);
+                // Mismatched commitLsn (0x999) vs BEGIN.finalLsn (0x100).
+                case 'C' -> new CommitMessage((byte) 0, 0x999L, 0x108L, 0L);
+                default -> null;
+            };
+        });
+
+        // When
+        insertTestEvent("66666666-6666-6666-6666-666666666666");
 
         // Then
         await()
@@ -196,10 +247,7 @@ class LsnUpdaterErrorHandlingIT {
             byte type = buf.get(buf.position());
 
             if (type == 'I') {
-                return new MessageInfo(
-                        MessageType.INSERT,
-                        new RelationInfo(1, "events", "some_other_table"),
-                        new InsertInfo(1, 123L));
+                return new InsertMessage(new RelationInfo(1, "events", "some_other_table"), 123L);
             }
 
             return null;

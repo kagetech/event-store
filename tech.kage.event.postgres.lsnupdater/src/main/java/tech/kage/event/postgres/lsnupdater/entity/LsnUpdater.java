@@ -45,14 +45,30 @@ import org.springframework.stereotype.Component;
 
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
-import tech.kage.event.postgres.lsnupdater.entity.PgOutputMessageParser.MessageInfo;
-import tech.kage.event.postgres.lsnupdater.entity.PgOutputMessageParser.MessageType;
+import tech.kage.event.postgres.lsnupdater.entity.PgOutputMessageParser.BeginMessage;
+import tech.kage.event.postgres.lsnupdater.entity.PgOutputMessageParser.CommitMessage;
+import tech.kage.event.postgres.lsnupdater.entity.PgOutputMessageParser.InsertMessage;
+import tech.kage.event.postgres.lsnupdater.entity.PgOutputMessageParser.RelationMessage;
 
 /**
  * Component that uses PostgreSQL logical replication to update LSN columns in
  * events tables.
- * Connects to an existing replication slot and processes INSERT operations to
- * set the LSN value for each inserted row.
+ * Connects to an existing replication slot and processes BEGIN/INSERT/COMMIT
+ * operations to set the LSN value of every inserted row to its transaction's
+ * commit LSN.
+ * 
+ * <h2>Why commit LSN, not insert LSN</h2>
+ * INSERT records in the WAL are themselves strictly monotonic — Postgres uses
+ * a single global WAL log. However, the pgoutput protocol delivers transactions
+ * to the consumer in commit order, not WAL-write order. So the sequence of
+ * per-INSERT WAL positions <em>as seen by this component</em> can decrease
+ * across consecutive transactions: txn A's INSERT at WAL=100 may arrive after
+ * txn B's INSERT at WAL=110 because B committed first.
+ * Stamping with the per-INSERT WAL position would therefore produce
+ * non-monotonic LSN values in the events table; consumers using
+ * {@code WHERE lsn > :cursor} would silently skip rows whose LSN regressed.
+ * Stamping with the commit LSN (BEGIN.final_lsn) instead gives all rows in a
+ * transaction the same LSN and guarantees monotonicity across transactions.
  * 
  * <h2>Correctness invariants</h2>
  * <ul>
@@ -104,6 +120,13 @@ class LsnUpdater {
     private Thread replicationThread;
     private Connection replicationConnection;
     private PGReplicationStream replicationStream;
+
+    /**
+     * Commit LSN of the currently-open transaction in the replication stream;
+     * {@code null} when not inside a transaction. Set on BEGIN, used to stamp
+     * each INSERT in the txn, cleared on COMMIT.
+     */
+    private Long currentTxnLsn;
 
     /**
      * Constructs a new {@link LsnUpdater} instance.
@@ -220,40 +243,50 @@ class LsnUpdater {
      * @param message replication payload buffer read from the stream
      */
     private void processMessage(ByteBuffer message) {
-        var messageInfo = parser.parse(message);
+        var parsed = parser.parse(message);
 
-        if (messageInfo != null && messageInfo.type() == MessageType.INSERT) {
-            processInsert(messageInfo);
+        switch (parsed) {
+            case BeginMessage begin -> currentTxnLsn = begin.finalLsn();
+            case InsertMessage insert -> processInsert(insert);
+            case CommitMessage commit -> {
+                if (currentTxnLsn == null || currentTxnLsn.longValue() != commit.commitLsn()) {
+                    throw new IllegalStateException(
+                            "COMMIT commitLsn=" + commit.commitLsn()
+                                    + " does not match open transaction's BEGIN.finalLsn=" + currentTxnLsn);
+                }
+                currentTxnLsn = null;
+            }
+            case RelationMessage relation -> {
+                // Relation metadata is cached inside the parser; nothing to do here.
+            }
+            case null -> {
+                // Unhandled message type; pgoutput protocol allows skipping.
+            }
         }
     }
 
     /**
-     * Processes an INSERT message and updates the LSN column.
-     *
-     * @param messageInfo parsed replication message details
+     * Processes an INSERT message and updates the LSN column with the current
+     * transaction's commit LSN.
+     * 
+     * @param insert parsed INSERT message
      */
-    private void processInsert(MessageInfo messageInfo) {
-        var relationInfo = messageInfo.relationInfo();
-        var insertInfo = messageInfo.insertInfo();
+    private void processInsert(InsertMessage insert) {
+        var relationInfo = insert.relation();
 
         // Only process tables ending with _events suffix
         if (!relationInfo.table().endsWith(TOPIC_SUFFIX)) {
             return;
         }
 
-        // Get the id value from the INSERT
-        var id = insertInfo.idValue();
-
-        if (id == null) {
+        if (currentTxnLsn == null) {
             throw new IllegalStateException(
-                    "INSERT for " + relationInfo.schema() + "." + relationInfo.table() + " is missing id value");
+                    "INSERT for " + relationInfo.schema() + "." + relationInfo.table()
+                            + " received outside of an open transaction (no BEGIN seen)");
         }
 
-        // Get LSN from the replication stream
-        var lsn = replicationStream.getLastReceiveLSN();
-
         // Update the LSN column
-        updateLsn(relationInfo.schema(), relationInfo.table(), id, lsn.asString());
+        updateLsn(relationInfo.schema(), relationInfo.table(), insert.id(), lsnToText(currentTxnLsn));
     }
 
     /**
@@ -264,7 +297,7 @@ class LsnUpdater {
      * @param id     row identifier to update
      * @param lsn    WAL location to persist in the row
      */
-    private void updateLsn(String schema, String table, Long id, String lsn) {
+    private void updateLsn(String schema, String table, long id, String lsn) {
         var sql = UPDATE_LSN_SQL.formatted(schema, table);
 
         var rowsUpdated = jdbcTemplate.update(sql, lsn, id);
@@ -275,6 +308,18 @@ class LsnUpdater {
         }
 
         log.debug("Updated LSN for {}.{} id={} to {}", schema, table, id, lsn);
+    }
+
+    /**
+     * Formats a 64-bit LSN as Postgres' canonical {@code "X/Y"} text form (high
+     * 32 bits / low 32 bits in uppercase hexadecimal).
+     * 
+     * @param lsn 64-bit WAL location
+     * 
+     * @return canonical {@code "X/Y"} text form of the LSN
+     */
+    private static String lsnToText(long lsn) {
+        return String.format("%X/%X", lsn >>> 32, lsn & 0xFFFFFFFFL);
     }
 
     // Added for testability

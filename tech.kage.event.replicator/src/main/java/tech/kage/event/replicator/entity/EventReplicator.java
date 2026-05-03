@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023-2025, Dariusz Szpakowski
+ * Copyright (c) 2023-2026, Dariusz Szpakowski
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -49,6 +49,7 @@ import org.springframework.scheduling.TaskScheduler;
 import org.springframework.stereotype.Component;
 
 import io.micrometer.core.instrument.MeterRegistry;
+import tech.kage.event.replicator.entity.EventReplicatorWorker.Cursor;
 
 /**
  * Component responsible for coordination of event replication process. Uses
@@ -156,18 +157,18 @@ class EventReplicator {
         // create progress Kafka topic
         kafkaAdmin.createOrModifyTopics(TopicBuilder.name(PROGRESS_TOPIC).partitions(1).compact().build());
 
-        log.info("Reading last replicated event LSNs...");
+        log.info("Reading last replicated event cursors...");
 
-        // read last replicated event LSNs (map topic->lsn)
-        var lastLsns = readLastLsns(getReplicatedTopics(jdbcTemplate), consumerFactory);
+        // read last replicated event cursors (map topic->cursor)
+        var lastCursors = readLastCursors(getReplicatedTopics(jdbcTemplate), consumerFactory);
 
         log.info("Scheduling workers...");
 
         // for each replicated topic
-        for (var lastLsn : lastLsns.entrySet()) {
+        for (var entry : lastCursors.entrySet()) {
             // create replicated Kafka topic
             kafkaAdmin.createOrModifyTopics(
-                    TopicBuilder.name(lastLsn.getKey()).config(TopicConfig.RETENTION_MS_CONFIG, "-1").build());
+                    TopicBuilder.name(entry.getKey()).config(TopicConfig.RETENTION_MS_CONFIG, "-1").build());
 
             // schedule a new worker for the replicated topic
             taskScheduler.scheduleWithFixedDelay(
@@ -177,8 +178,8 @@ class EventReplicator {
                             meterRegistry,
                             environment,
                             eventSchema,
-                            lastLsn.getKey(),
-                            lastLsn.getValue()),
+                            entry.getKey(),
+                            entry.getValue()),
                     Duration.ofMillis(pollInterval));
         }
 
@@ -203,20 +204,21 @@ class EventReplicator {
     }
 
     /**
-     * Reads the last replicated LSNs for each topic from the progress Kafka topic.
+     * Reads the last replicated cursors for each topic from the progress Kafka
+     * topic.
      * 
      * @param replicatedTopics a list of replicated topics
      * @param consumerFactory  an instance of {@link ConsumerFactory}
      * 
-     * @return map of topics with the LSNs of the last replicated events
+     * @return map of topics with the cursors of the last replicated events
      */
-    private Map<String, String> readLastLsns(
+    private Map<String, Cursor> readLastCursors(
             List<String> replicatedTopics,
             ConsumerFactory<byte[], byte[]> consumerFactory) {
-        var lastLsns = new HashMap<String, String>();
+        var lastCursors = new HashMap<String, Cursor>();
 
         for (var topic : replicatedTopics) {
-            lastLsns.put(topic, "0/0");
+            lastCursors.put(topic, Cursor.INITIAL);
         }
 
         var topicPartition = List.of(new TopicPartition(PROGRESS_TOPIC, 0));
@@ -239,7 +241,7 @@ class EventReplicator {
                 var topic = stringFromBytes(consumerRecord.key());
 
                 if (replicatedTopics.contains(topic)) {
-                    lastLsns.put(topic, stringFromBytes(consumerRecord.value()));
+                    lastCursors.put(topic, Cursor.fromProgressValue(stringFromBytes(consumerRecord.value())));
                 }
             }
 
@@ -250,7 +252,7 @@ class EventReplicator {
             }
         }
 
-        return lastLsns;
+        return lastCursors;
     }
 
     private byte[] stringToBytes(String str) {

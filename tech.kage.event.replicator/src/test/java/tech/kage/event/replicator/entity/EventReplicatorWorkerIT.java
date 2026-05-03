@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023-2025, Dariusz Szpakowski
+ * Copyright (c) 2023-2026, Dariusz Szpakowski
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -28,6 +28,8 @@ package tech.kage.event.replicator.entity;
 import static java.util.Comparator.comparing;
 import static java.util.stream.Collectors.toCollection;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.mock;
 import static tech.kage.event.EventStore.SOURCE_ID;
 import static tech.kage.event.EventStore.SOURCE_LSN;
 import static tech.kage.event.replicator.entity.EventReplicator.PROGRESS_TOPIC;
@@ -69,6 +71,7 @@ import org.testcontainers.kafka.KafkaContainer;
 
 import io.micrometer.core.instrument.MeterRegistry;
 import tech.kage.event.crypto.MetadataSerializer;
+import tech.kage.event.replicator.entity.EventReplicatorWorker.Cursor;
 
 /**
  * Integration tests for {@link EventReplicatorWorker}.
@@ -128,10 +131,10 @@ abstract class EventReplicatorWorkerIT<K> {
     @Test
     void copiesEventsFromDatabaseToKafkaInSinglePoll() {
         // Given
-        var lastLsn = "0/0";
+        var lastCursor = Cursor.INITIAL;
 
         var worker = new EventReplicatorWorker(
-                jdbcTemplate, kafkaTemplate, meterRegistry, environment, eventSchema, topic, lastLsn);
+                jdbcTemplate, kafkaTemplate, meterRegistry, environment, eventSchema, topic, lastCursor);
 
         var sourceEvents = IntStream
                 .rangeClosed(1, maxPollRows - 1)
@@ -173,10 +176,10 @@ abstract class EventReplicatorWorkerIT<K> {
     @Test
     void copiesEventsFromDatabaseToKafkaInMultiplePolls() {
         // Given
-        var lastLsn = "0/0";
+        var lastCursor = Cursor.INITIAL;
 
         var worker = new EventReplicatorWorker(
-                jdbcTemplate, kafkaTemplate, meterRegistry, environment, eventSchema, topic, lastLsn);
+                jdbcTemplate, kafkaTemplate, meterRegistry, environment, eventSchema, topic, lastCursor);
 
         var sourceEvents = IntStream
                 .rangeClosed(1, maxPollRows + 1)
@@ -216,12 +219,72 @@ abstract class EventReplicatorWorkerIT<K> {
     }
 
     @Test
-    void resumesCopyingEventsFromGivenLsn() {
+    void copiesEventsSharingLsnFromDatabaseToKafkaInMultiplePolls() {
         // Given
-        var lastLsn = "0/5";
+        // A multi-event transaction produces several rows that all share one
+        // commit LSN once LsnUpdater has stamped them. Here we simulate the
+        // post-stamping state by inserting rows with a fixed lsn.
+        // batchSize is set below the row count so the worker has to resume
+        // past same-LSN siblings — only the (lsn, id) cursor allows that.
+        var sharedLsn = "0/100";
+        var batchSize = 2;
+        var rowCount = batchSize + 1;
+
+        var sourceEvents = IntStream
+                .rangeClosed(1, rowCount)
+                .boxed()
+                .map(id -> {
+                    var base = testEvent(id);
+                    return new EventData(
+                            base.id(), base.key(), base.data(), base.metadata(), base.timestamp(), sharedLsn);
+                })
+                .toList();
+
+        for (var event : sourceEvents) {
+            insertEvent(topic, event);
+        }
+
+        var batchEnv = mock(Environment.class);
+        given(batchEnv.getProperty("event.replicator.poll.max.rows", Integer.class, 100))
+                .willReturn(batchSize);
 
         var worker = new EventReplicatorWorker(
-                jdbcTemplate, kafkaTemplate, meterRegistry, environment, eventSchema, topic, lastLsn);
+                jdbcTemplate, kafkaTemplate, meterRegistry, batchEnv, eventSchema, topic, Cursor.INITIAL);
+
+        // When
+        worker.run();
+
+        // Then
+        var replicatedEvents = readRecordsFromKafka(topic);
+
+        assertThat(replicatedEvents)
+                .describedAs("replicated events")
+                .zipSatisfy(sourceEvents, (replicatedEvent, sourceEvent) -> {
+                    assertThat(replicatedEvent.key())
+                            .describedAs("replicated event key")
+                            .isEqualTo(keyToBytes(sourceEvent.key()));
+
+                    assertThat(replicatedEvent.value())
+                            .describedAs("replicated event data")
+                            .isEqualTo(sourceEvent.data());
+
+                    assertThat(replicatedEvent.timestamp())
+                            .describedAs("replicated event timestamp")
+                            .isEqualTo(sourceEvent.timestamp().toEpochMilli());
+
+                    assertThat(replicatedEvent.headers())
+                            .describedAs("replicated event headers")
+                            .isEqualTo(expectedHeaders(sourceEvent));
+                });
+    }
+
+    @Test
+    void resumesCopyingEventsFromGivenCursor() {
+        // Given
+        var lastCursor = new Cursor("0/5", 5L);
+
+        var worker = new EventReplicatorWorker(
+                jdbcTemplate, kafkaTemplate, meterRegistry, environment, eventSchema, topic, lastCursor);
 
         var sourceEvents = IntStream
                 .rangeClosed(1, 11)
@@ -263,13 +326,13 @@ abstract class EventReplicatorWorkerIT<K> {
     }
 
     @Test
-    void storesLastReplicatedEventLsn() {
+    void storesLastReplicatedEventCursor() {
         // Given
-        var lastLsn = "0/8";
-        var expectedLastLsn = "0/17"; // 23 in hex
+        var lastCursor = new Cursor("0/8", 8L);
+        var expectedLastCursor = "0/17:23"; // lsn 0/17 (23 hex), id 23
 
         var worker = new EventReplicatorWorker(
-                jdbcTemplate, kafkaTemplate, meterRegistry, environment, eventSchema, topic, lastLsn);
+                jdbcTemplate, kafkaTemplate, meterRegistry, environment, eventSchema, topic, lastCursor);
 
         var sourceEvents = IntStream
                 .rangeClosed(1, 23)
@@ -285,25 +348,25 @@ abstract class EventReplicatorWorkerIT<K> {
         worker.run();
 
         // Then
-        String storedLastLsn = null;
+        String storedLastCursor = null;
 
         var progressRecords = readRecordsFromKafka(PROGRESS_TOPIC);
 
         for (var consumerRecord : progressRecords) {
             if (topic.contains(stringFromBytes(consumerRecord.key()))) {
-                storedLastLsn = stringFromBytes(consumerRecord.value());
+                storedLastCursor = stringFromBytes(consumerRecord.value());
             }
         }
 
-        assertThat(storedLastLsn)
-                .describedAs("stored last LSN")
-                .isEqualTo(expectedLastLsn);
+        assertThat(storedLastCursor)
+                .describedAs("stored last cursor")
+                .isEqualTo(expectedLastCursor);
     }
 
     @Test
     void monitorsReplicationLag() {
         // Given
-        var lastLsn = "0/5";
+        var lastCursor = new Cursor("0/5", 5L);
         var expectedReplicationLag = 8;
 
         var sourceEvents = IntStream
@@ -317,7 +380,8 @@ abstract class EventReplicatorWorkerIT<K> {
         }
 
         // When
-        new EventReplicatorWorker(jdbcTemplate, kafkaTemplate, meterRegistry, environment, eventSchema, topic, lastLsn);
+        new EventReplicatorWorker(jdbcTemplate, kafkaTemplate, meterRegistry, environment, eventSchema, topic,
+                lastCursor);
 
         // Then
         var replicationLag = meterRegistry.find("event.replicator.lag").tag("topic", topic).gauge().value();
@@ -330,11 +394,11 @@ abstract class EventReplicatorWorkerIT<K> {
     @Test
     void reportsZeroLagWhenNoEventsHaveLsn() {
         // Given
-        var lastLsn = "0/0";
+        var lastCursor = Cursor.INITIAL;
 
         // When
         new EventReplicatorWorker(
-                jdbcTemplate, kafkaTemplate, meterRegistry, environment, eventSchema, topic, lastLsn);
+                jdbcTemplate, kafkaTemplate, meterRegistry, environment, eventSchema, topic, lastCursor);
 
         // Then
         var replicationLag = meterRegistry.find("event.replicator.lag").tag("topic", topic).gauge().value();
