@@ -16,7 +16,7 @@
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
  * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
  * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCESSING OF SUBSTITUTE GOODS OR
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
  * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
  * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
@@ -35,7 +35,8 @@ import org.springframework.stereotype.Component;
 
 /**
  * Parser for PostgreSQL pgoutput binary protocol messages.
- * Handles RELATION and INSERT messages, skips other message types.
+ * Handles BEGIN, COMMIT, RELATION and INSERT messages, skips other message
+ * types.
  * 
  * <p>
  * The parser assumes a fixed event table schema where {@code id} is always
@@ -52,6 +53,16 @@ import org.springframework.stereotype.Component;
  */
 @Component
 class PgOutputMessageParser {
+    /**
+     * Message type byte for BEGIN.
+     */
+    private static final byte MESSAGE_TYPE_BEGIN = 'B';
+
+    /**
+     * Message type byte for COMMIT.
+     */
+    private static final byte MESSAGE_TYPE_COMMIT = 'C';
+
     /**
      * Message type byte for RELATION (table metadata).
      */
@@ -72,9 +83,9 @@ class PgOutputMessageParser {
      * 
      * @param buffer the ByteBuffer containing the message
      * 
-     * @return parsed message info, or null if message type is not handled
+     * @return parsed message, or null if message type is not handled
      */
-    MessageInfo parse(ByteBuffer buffer) {
+    PgOutputMessage parse(ByteBuffer buffer) {
         if (buffer.remaining() < 1) {
             return null;
         }
@@ -82,10 +93,58 @@ class PgOutputMessageParser {
         var messageType = buffer.get();
 
         return switch (messageType) {
+            case MESSAGE_TYPE_BEGIN -> parseBegin(buffer);
+            case MESSAGE_TYPE_COMMIT -> parseCommit(buffer);
             case MESSAGE_TYPE_RELATION -> parseRelation(buffer);
             case MESSAGE_TYPE_INSERT -> parseInsert(buffer);
             default -> null;
         };
+    }
+
+    /**
+     * Parses a BEGIN message.
+     * Format: final_lsn (8 bytes, big-endian), commit_timestamp (8 bytes,
+     * big-endian), xid (4 bytes, big-endian).
+     * 
+     * <p>
+     * In pgoutput v1 with non-streaming transactions, {@code final_lsn} equals
+     * the eventual commit LSN of the transaction. The walsender knows this value
+     * before emitting BEGIN because the entire transaction has already been
+     * decoded from the WAL.
+     * 
+     * @param buffer byte buffer containing the BEGIN message payload
+     * 
+     * @return parsed BEGIN message
+     */
+    private BeginMessage parseBegin(ByteBuffer buffer) {
+        buffer.order(ByteOrder.BIG_ENDIAN);
+
+        var finalLsn = buffer.getLong();
+        var commitTimestamp = buffer.getLong();
+        var xid = buffer.getInt();
+
+        return new BeginMessage(finalLsn, commitTimestamp, xid);
+    }
+
+    /**
+     * Parses a COMMIT message.
+     * Format: flags (1 byte), commit_lsn (8 bytes, big-endian), end_lsn (8 bytes,
+     * big-endian), commit_timestamp (8 bytes, big-endian).
+     * 
+     * @param buffer byte buffer containing the COMMIT message payload
+     * 
+     * @return parsed COMMIT message
+     */
+    private CommitMessage parseCommit(ByteBuffer buffer) {
+        var flags = buffer.get();
+
+        buffer.order(ByteOrder.BIG_ENDIAN);
+
+        var commitLsn = buffer.getLong();
+        var endLsn = buffer.getLong();
+        var commitTimestamp = buffer.getLong();
+
+        return new CommitMessage(flags, commitLsn, endLsn, commitTimestamp);
     }
 
     /**
@@ -96,9 +155,9 @@ class PgOutputMessageParser {
      * 
      * @param buffer byte buffer containing the RELATION message payload
      * 
-     * @return parsed relation message information
+     * @return parsed RELATION message
      */
-    private MessageInfo parseRelation(ByteBuffer buffer) {
+    private RelationMessage parseRelation(ByteBuffer buffer) {
         buffer.order(ByteOrder.BIG_ENDIAN);
 
         var relationId = buffer.getInt();
@@ -111,7 +170,7 @@ class PgOutputMessageParser {
 
         relations.put(relationId, relationInfo);
 
-        return new MessageInfo(MessageType.RELATION, relationInfo, null);
+        return new RelationMessage(relationInfo);
     }
 
     /**
@@ -120,9 +179,9 @@ class PgOutputMessageParser {
      * 
      * @param buffer byte buffer containing the INSERT message payload
      * 
-     * @return parsed insert message information
+     * @return parsed INSERT message
      */
-    private MessageInfo parseInsert(ByteBuffer buffer) {
+    private InsertMessage parseInsert(ByteBuffer buffer) {
         buffer.order(ByteOrder.BIG_ENDIAN);
 
         var relationId = buffer.getInt();
@@ -136,7 +195,7 @@ class PgOutputMessageParser {
 
         var idValue = parseIdValue(buffer);
 
-        return new MessageInfo(MessageType.INSERT, relationInfo, new InsertInfo(relationId, idValue));
+        return new InsertMessage(relationInfo, idValue);
     }
 
     /**
@@ -148,9 +207,9 @@ class PgOutputMessageParser {
      * 
      * @param buffer byte buffer containing tuple data
      * 
-     * @return the id value as Long
+     * @return the id value
      */
-    private Long parseIdValue(ByteBuffer buffer) {
+    private long parseIdValue(ByteBuffer buffer) {
         var tupleType = buffer.get();
 
         if (tupleType != 'N') { // 'N' for new tuple
@@ -201,21 +260,50 @@ class PgOutputMessageParser {
     }
 
     /**
-     * Message type enumeration.
+     * Parsed pgoutput message.
      */
-    enum MessageType {
-        RELATION,
-        INSERT
+    sealed interface PgOutputMessage permits BeginMessage, CommitMessage, RelationMessage, InsertMessage {
     }
 
     /**
-     * Container for parsed message information.
+     * BEGIN message marking the start of a transaction in the replication stream.
      * 
-     * @param type         parsed message type
-     * @param relationInfo relation metadata extracted from the message
-     * @param insertInfo   insert metadata extracted from the message
+     * @param finalLsn        commit LSN of the transaction (known up front because
+     *                        the walsender has already decoded the COMMIT record)
+     * @param commitTimestamp commit timestamp in microseconds since 2000-01-01 UTC
+     * @param xid             transaction id
      */
-    static record MessageInfo(MessageType type, RelationInfo relationInfo, InsertInfo insertInfo) {
+    record BeginMessage(long finalLsn, long commitTimestamp, int xid) implements PgOutputMessage {
+    }
+
+    /**
+     * COMMIT message marking the end of a transaction in the replication stream.
+     * 
+     * @param flags           commit flags (must be 0 in pgoutput v1)
+     * @param commitLsn       LSN of the commit record (must equal the matching
+     *                        BEGIN's finalLsn)
+     * @param endLsn          LSN immediately after the commit record
+     * @param commitTimestamp commit timestamp in microseconds since 2000-01-01 UTC
+     */
+    record CommitMessage(byte flags, long commitLsn, long endLsn, long commitTimestamp) implements PgOutputMessage {
+    }
+
+    /**
+     * RELATION message describing a table's schema.
+     * 
+     * @param relation parsed relation metadata (cached for use by subsequent
+     *                 INSERT messages referencing the same relation OID)
+     */
+    record RelationMessage(RelationInfo relation) implements PgOutputMessage {
+    }
+
+    /**
+     * INSERT message describing a single inserted row.
+     * 
+     * @param relation relation the row was inserted into
+     * @param id       parsed id column value
+     */
+    record InsertMessage(RelationInfo relation, long id) implements PgOutputMessage {
     }
 
     /**
@@ -225,15 +313,6 @@ class PgOutputMessageParser {
      * @param schema     relation schema name
      * @param table      relation table name
      */
-    static record RelationInfo(int relationId, String schema, String table) {
-    }
-
-    /**
-     * Information about an INSERT operation.
-     * 
-     * @param relationId internal relation identifier from pgoutput
-     * @param idValue    parsed id column value
-     */
-    static record InsertInfo(int relationId, Long idValue) {
+    record RelationInfo(int relationId, String schema, String table) {
     }
 }

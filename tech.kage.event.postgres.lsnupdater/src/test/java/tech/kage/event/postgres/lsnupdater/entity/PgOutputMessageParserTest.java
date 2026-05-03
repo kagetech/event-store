@@ -43,10 +43,12 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
-import tech.kage.event.postgres.lsnupdater.entity.PgOutputMessageParser.InsertInfo;
-import tech.kage.event.postgres.lsnupdater.entity.PgOutputMessageParser.MessageInfo;
-import tech.kage.event.postgres.lsnupdater.entity.PgOutputMessageParser.MessageType;
+import tech.kage.event.postgres.lsnupdater.entity.PgOutputMessageParser.BeginMessage;
+import tech.kage.event.postgres.lsnupdater.entity.PgOutputMessageParser.CommitMessage;
+import tech.kage.event.postgres.lsnupdater.entity.PgOutputMessageParser.InsertMessage;
+import tech.kage.event.postgres.lsnupdater.entity.PgOutputMessageParser.PgOutputMessage;
 import tech.kage.event.postgres.lsnupdater.entity.PgOutputMessageParser.RelationInfo;
+import tech.kage.event.postgres.lsnupdater.entity.PgOutputMessageParser.RelationMessage;
 
 /**
  * Tests of {@link PgOutputMessageParser}.
@@ -58,14 +60,39 @@ class PgOutputMessageParserTest {
     PgOutputMessageParser parser = new PgOutputMessageParser();
 
     @Test
+    void parsesBeginMessages() throws IOException {
+        // Given
+        var buffer = buildBeginMessage(0x12A4B5CL, 1234567890L, 42);
+
+        var expected = new BeginMessage(0x12A4B5CL, 1234567890L, 42);
+
+        // When
+        var result = parser.parse(buffer);
+
+        // Then
+        assertThat(result).isEqualTo(expected);
+    }
+
+    @Test
+    void parsesCommitMessages() throws IOException {
+        // Given
+        var buffer = buildCommitMessage((byte) 0, 0x12A4B5CL, 0x12A4B60L, 1234567890L);
+
+        var expected = new CommitMessage((byte) 0, 0x12A4B5CL, 0x12A4B60L, 1234567890L);
+
+        // When
+        var result = parser.parse(buffer);
+
+        // Then
+        assertThat(result).isEqualTo(expected);
+    }
+
+    @Test
     void parsesRelationMessages() throws IOException {
         // Given
         var buffer = buildRelationMessage(12345, "events", "user_events", "id", "key", "data");
 
-        var expected = new MessageInfo(
-                MessageType.RELATION,
-                new RelationInfo(12345, "events", "user_events"),
-                null);
+        var expected = new RelationMessage(new RelationInfo(12345, "events", "user_events"));
 
         // When
         var result = parser.parse(buffer);
@@ -76,8 +103,8 @@ class PgOutputMessageParserTest {
 
     @ParameterizedTest
     @MethodSource("testInsertMessagesWithKnownRelation")
-    void parsesInsertMessagesWithKnownRelation(ByteBuffer relationBuffer, ByteBuffer insertBuffer, MessageInfo expected)
-            throws IOException {
+    void parsesInsertMessagesWithKnownRelation(ByteBuffer relationBuffer, ByteBuffer insertBuffer,
+            PgOutputMessage expected) throws IOException {
         // Given
         parser.parse(relationBuffer); // Parse RELATION message first to register relation metadata in the parser
 
@@ -94,18 +121,12 @@ class PgOutputMessageParserTest {
                         named("insert with id at first position",
                                 buildRelationMessage(100, "events", "test_events", "id", "key", "data")),
                         buildInsertMessage(100, "42"),
-                        new MessageInfo(
-                                MessageType.INSERT,
-                                new RelationInfo(100, "events", "test_events"),
-                                new InsertInfo(100, 42L))),
+                        new InsertMessage(new RelationInfo(100, "events", "test_events"), 42L)),
                 arguments(
                         named("insert with large id value",
                                 buildRelationMessage(300, "events", "big_events", "id")),
                         buildInsertMessage(300, "9223372036854775807"),
-                        new MessageInfo(
-                                MessageType.INSERT,
-                                new RelationInfo(300, "events", "big_events"),
-                                new InsertInfo(300, Long.MAX_VALUE))));
+                        new InsertMessage(new RelationInfo(300, "events", "big_events"), Long.MAX_VALUE)));
     }
 
     @Test
@@ -121,14 +142,8 @@ class PgOutputMessageParserTest {
         var inserts = List.of(buildInsertMessage(1, "100"), buildInsertMessage(2, "200"));
 
         var expected = List.of(
-                new MessageInfo(
-                        MessageType.INSERT,
-                        new RelationInfo(1, "events", "events_a"),
-                        new InsertInfo(1, 100L)),
-                new MessageInfo(
-                        MessageType.INSERT,
-                        new RelationInfo(2, "events", "events_b"),
-                        new InsertInfo(2, 200L)));
+                new InsertMessage(new RelationInfo(1, "events", "events_a"), 100L),
+                new InsertMessage(new RelationInfo(2, "events", "events_b"), 200L));
 
         // When
         var results = inserts.stream().map(parser::parse).toList();
@@ -204,8 +219,42 @@ class PgOutputMessageParserTest {
         return Stream.of(
                 arguments(named("empty buffer", ByteBuffer.allocate(0))),
                 arguments(named("unknown message type 'X'", ByteBuffer.allocate(1).put((byte) 'X').flip())),
-                arguments(named("BEGIN message", ByteBuffer.allocate(1).put((byte) 'B').flip())),
-                arguments(named("COMMIT message", ByteBuffer.allocate(1).put((byte) 'C').flip())));
+                arguments(named("ORIGIN message", ByteBuffer.allocate(1).put((byte) 'O').flip())),
+                arguments(named("TRUNCATE message", ByteBuffer.allocate(1).put((byte) 'T').flip())));
+    }
+
+    /**
+     * Builds a BEGIN message buffer.
+     * Format: 'B' (1 byte), final_lsn (8 bytes), commit_timestamp (8 bytes),
+     * xid (4 bytes).
+     */
+    private static ByteBuffer buildBeginMessage(long finalLsn, long commitTimestamp, int xid) throws IOException {
+        var out = new ByteArrayOutputStream();
+
+        out.write('B');
+        out.write(toBytes(finalLsn));
+        out.write(toBytes(commitTimestamp));
+        out.write(toBytes(xid));
+
+        return ByteBuffer.wrap(out.toByteArray());
+    }
+
+    /**
+     * Builds a COMMIT message buffer.
+     * Format: 'C' (1 byte), flags (1 byte), commit_lsn (8 bytes), end_lsn (8
+     * bytes), commit_timestamp (8 bytes).
+     */
+    private static ByteBuffer buildCommitMessage(byte flags, long commitLsn, long endLsn, long commitTimestamp)
+            throws IOException {
+        var out = new ByteArrayOutputStream();
+
+        out.write('C');
+        out.write(flags);
+        out.write(toBytes(commitLsn));
+        out.write(toBytes(endLsn));
+        out.write(toBytes(commitTimestamp));
+
+        return ByteBuffer.wrap(out.toByteArray());
     }
 
     /**
@@ -290,5 +339,12 @@ class PgOutputMessageParserTest {
      */
     private static byte[] toBytes(int value) {
         return ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN).putInt(value).array();
+    }
+
+    /**
+     * Converts a long to 8 bytes in big-endian order.
+     */
+    private static byte[] toBytes(long value) {
+        return ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putLong(value).array();
     }
 }
